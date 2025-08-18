@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+
+	"github.com/deorth-kku/go-common"
 )
 
 type response struct {
@@ -51,8 +53,8 @@ func (e *JSONRPCError) Error() string {
 
 var (
 	_             error = (*JSONRPCError)(nil)
-	marshalableRT       = reflect.TypeOf(new(marshalable)).Elem()
-	errorCodecRT        = reflect.TypeOf(new(RPCErrorCodec)).Elem()
+	marshalableRT       = reflect.TypeFor[marshalable]()
+	errorCodecRT        = reflect.TypeFor[RPCErrorCodec]()
 )
 
 func (e *JSONRPCError) val(errors *Errors) reflect.Value {
@@ -67,12 +69,12 @@ func (e *JSONRPCError) val(errors *Errors) reflect.Value {
 			}
 
 			if v.Type().Implements(errorCodecRT) {
-				if err := v.Interface().(RPCErrorCodec).FromJSONRPCError(*e); err != nil {
+				if err := common.MustOk(reflect.TypeAssert[RPCErrorCodec](v)).FromJSONRPCError(*e); err != nil {
 					log.Errorf("Error converting JSONRPCError to custom error type '%s' (code %d): %w", t.String(), e.Code, err)
 					return reflect.ValueOf(e)
 				}
 			} else if len(e.Meta) > 0 && v.Type().Implements(marshalableRT) {
-				if err := v.Interface().(marshalable).UnmarshalJSON(e.Meta); err != nil {
+				if err := common.MustOk(reflect.TypeAssert[marshalable](v)).UnmarshalJSON(e.Meta); err != nil {
 					log.Errorf("Error unmarshalling error metadata to custom error type '%s' (code %d): %w", t.String(), e.Code, err)
 					return reflect.ValueOf(e)
 				}

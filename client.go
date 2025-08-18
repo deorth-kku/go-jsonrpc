@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	logging "github.com/ipfs/go-log/v2"
@@ -30,8 +31,8 @@ const (
 )
 
 var (
-	errorType   = reflect.TypeOf(new(error)).Elem()
-	contextType = reflect.TypeOf(new(context.Context)).Elem()
+	errorType   = reflect.TypeFor[error]()
+	contextType = reflect.TypeFor[context.Context]()
 
 	log = logging.Logger("rpc")
 
@@ -467,7 +468,7 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 					return
 				case 1:
 					if ok {
-						vvval := val.Interface().(reflect.Value)
+						vvval := common.MustOk(reflect.TypeAssert[reflect.Value](val))
 						buf.PushBack(vvval)
 						if buf.Len() > 1 {
 							if buf.Len() > 10 {
@@ -601,7 +602,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value)
 	var serializedParams json.RawMessage
 
 	if fn.hasRawParams {
-		serializedParams = json.RawMessage(args[fn.hasCtx].Interface().(RawParams))
+		serializedParams = json.RawMessage(common.MustOk(reflect.TypeAssert[RawParams](args[fn.hasCtx])))
 	} else {
 		params := make([]param, len(args)-fn.hasCtx)
 		for i, arg := range args[fn.hasCtx:] {
@@ -629,7 +630,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value)
 	var ctx context.Context
 	var span *trace.Span
 	if fn.hasCtx == 1 {
-		ctx = args[0].Interface().(context.Context)
+		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
 		ctx, span = trace.StartSpan(ctx, "api.call")
 		defer span.End()
 	}

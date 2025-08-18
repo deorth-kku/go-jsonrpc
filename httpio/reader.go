@@ -15,6 +15,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"golang.org/x/xerrors"
 
+	"github.com/deorth-kku/go-common"
 	"github.com/filecoin-project/go-jsonrpc"
 )
 
@@ -22,7 +23,7 @@ var log = logging.Logger("rpc")
 
 func ReaderParamEncoder(addr string) jsonrpc.Option {
 	return jsonrpc.WithParamEncoder(new(io.Reader), func(value reflect.Value) (reflect.Value, error) {
-		r := value.Interface().(io.Reader)
+		r := common.MustOk(reflect.TypeAssert[io.Reader](value))
 
 		reqID := uuid.New()
 		u, _ := url.Parse(addr)

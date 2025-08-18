@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/deorth-kku/go-common"
 	"github.com/gorilla/websocket"
 	"golang.org/x/xerrors"
 )
@@ -201,7 +202,7 @@ func (c *wsConn) handleOutChans() {
 				return
 			}
 
-			registration := val.Interface().(outChanReg)
+			registration := common.MustOk(reflect.TypeAssert[outChanReg](val))
 
 			caseToID = append(caseToID, registration.chID)
 			cases = append(cases, reflect.SelectCase{

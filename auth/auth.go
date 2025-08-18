@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/deorth-kku/go-common"
 	"golang.org/x/xerrors"
 )
 
@@ -57,7 +58,7 @@ func PermissionedProxy(validPerms, defaultPerms []Permission, in interface{}, ou
 		fn := ra.MethodByName(field.Name)
 
 		rint.Field(f).Set(reflect.MakeFunc(field.Type, func(args []reflect.Value) (results []reflect.Value) {
-			ctx := args[0].Interface().(context.Context)
+			ctx := common.MustOk(reflect.TypeAssert[context.Context](args[0]))
 			if HasPerm(ctx, defaultPerms, requiredPerm) {
 				return fn.Call(args)
 			}

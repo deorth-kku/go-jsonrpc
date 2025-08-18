@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/deorth-kku/go-common"
 	"github.com/gorilla/websocket"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/stretchr/testify/assert"
@@ -1128,7 +1129,7 @@ var (
 )
 
 func readerEnc(rin reflect.Value) (reflect.Value, error) {
-	reader := rin.Interface().(io.Reader)
+	reader := common.MustOk(reflect.TypeAssert[io.Reader](rin))
 
 	readerRegisteryLk.Lock()
 	defer readerRegisteryLk.Unlock()

@@ -112,7 +112,7 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 // If there is no reverse client, the call will return a zero value and `false`. Otherwise a reverse
 // client and `true` will be returned.
 func ExtractReverseClient[C any](ctx context.Context) (C, bool) {
-	c, ok := ctx.Value(jsonrpcReverseClient{reflect.TypeOf(new(C)).Elem()}).(*C)
+	c, ok := ctx.Value(jsonrpcReverseClient{reflect.TypeFor[C]()}).(*C)
 	if !ok {
 		return *new(C), false
 	}
