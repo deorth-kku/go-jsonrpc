@@ -5,7 +5,9 @@ import (
 	"container/list"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -68,11 +70,46 @@ func (e *ErrClient) Unwrap() error {
 	return e.err
 }
 
+type resultValue struct {
+	functy func() reflect.Type
+	value  reflect.Value
+}
+
+var (
+	_ json.UnmarshalerFrom = (*resultValue)(nil)
+	_ json.MarshalerTo     = (*resultValue)(nil)
+
+	reflectUint64Type = reflect.TypeFor[uint64]()
+	reflectyAnyType   = reflect.TypeFor[any]()
+	reflectAnyNil     = reflect.Zero(reflectyAnyType)
+)
+
+func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	if rv.functy == nil {
+		return errors.New("cannot get value type")
+	}
+	ty := rv.functy()
+	if ty == nil {
+		if dec.PeekKind() == 'n' {
+			rv.value = reflectAnyNil
+			return dec.SkipValue()
+		}
+		return errors.New("cannot get value type")
+	}
+	temprv := reflect.New(ty)
+	rv.value = temprv.Elem()
+	return json.UnmarshalDecode(dec, temprv.Interface())
+}
+
+func (rv resultValue) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, rv.value.Interface())
+}
+
 type clientResponse struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	Result  json.RawMessage `json:"result"`
-	ID      interface{}     `json:"id"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
+	Jsonrpc string        `json:"jsonrpc,omitzero"`
+	Result  resultValue   `json:"result,omitzero"`
+	ID      any           `json:"id,omitzero"`
+	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
 type makeChanSink func() (context.Context, func([]byte, bool))
@@ -83,6 +120,8 @@ type clientRequest struct {
 
 	// retCh provides a context and sink for handling incoming channel messages
 	retCh makeChanSink
+	// respType provides the type for [clientResponse.Result]
+	respType reflect.Type
 }
 
 // ClientCloser is used to close Client from further use
@@ -168,8 +207,9 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 		defer rawResp.Close()
 
 		var resp clientResponse
+		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.NewDecoder(rawResp).Decode(&resp); err != nil {
+			if err := json.UnmarshalRead(rawResp, &resp); err != nil {
 				return clientResponse{}, xerrors.Errorf("unmarshaling response: %w", err)
 			}
 
@@ -242,8 +282,9 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 		defer httpResp.Body.Close()
 
 		var resp clientResponse
+		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+			if err := json.UnmarshalRead(httpResp.Body, &resp); err != nil {
 				return clientResponse{}, xerrors.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
 			}
 
@@ -519,12 +560,13 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 	return func() reflect.Value { return retVal }, chCtor
 }
 
-func (c *client) sendRequest(ctx context.Context, req request, chCtor makeChanSink) (clientResponse, error) {
+func (c *client) sendRequest(ctx context.Context, req request, chCtor makeChanSink, ty reflect.Type) (clientResponse, error) {
 	creq := clientRequest{
 		req:   req,
 		ready: make(chan clientResponse, 1),
 
-		retCh: chCtor,
+		retCh:    chCtor,
+		respType: ty,
 	}
 
 	return c.doRequest(ctx, creq)
@@ -555,12 +597,15 @@ func (fn *rpcFunc) processResponse(resp clientResponse, rval reflect.Value) []re
 	out := make([]reflect.Value, fn.nout)
 
 	if fn.valOut != -1 {
-		out[fn.valOut] = rval
+		if rval.IsValid() {
+			out[fn.valOut] = rval
+		} else {
+			out[fn.valOut] = reflect.Zero(fn.ftyp.Out(fn.valOut))
+		}
 	}
 	if fn.errOut != -1 {
 		out[fn.errOut] = reflect.New(errorType).Elem()
 		if resp.Error != nil {
-
 			out[fn.errOut].Set(resp.Error.val(fn.client.errors))
 		}
 	}
@@ -582,7 +627,7 @@ func (fn *rpcFunc) processError(err error) []reflect.Value {
 	return out
 }
 
-func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value) {
+func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	var id interface{}
 	if !fn.notify {
 		id = atomic.AddInt64(&fn.client.idCtr, 1)
@@ -599,10 +644,10 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value)
 		}
 	}
 
-	var serializedParams json.RawMessage
+	var serializedParams jsontext.Value
 
 	if fn.hasRawParams {
-		serializedParams = json.RawMessage(common.MustOk(reflect.TypeAssert[RawParams](args[fn.hasCtx])))
+		serializedParams = jsontext.Value(common.MustOk(reflect.TypeAssert[RawParams](args[fn.hasCtx])))
 	} else {
 		params := make([]param, len(args)-fn.hasCtx)
 		for i, arg := range args[fn.hasCtx:] {
@@ -666,12 +711,21 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value)
 		minDelay: methodMinRetryDelay,
 	}
 
+	var ty reflect.Type
+	switch {
+	case fn.returnValueIsChannel:
+		ty = reflectUint64Type
+	case fn.valOut == -1:
+		ty = reflectyAnyType // this allow [resultValue] to discard any data when unmarsheling
+	default:
+		ty = fn.ftyp.Out(fn.valOut)
+	}
 	var err error
 	var resp clientResponse
 	// keep retrying if got a forced closed websocket conn and calling method
 	// has retry annotation
 	for attempt := 0; true; attempt++ {
-		resp, err = fn.client.sendRequest(ctx, req, chCtor)
+		resp, err = fn.client.sendRequest(ctx, req, chCtor, ty)
 		if err != nil {
 			return fn.processError(fmt.Errorf("sendRequest failed: %w", err))
 		}
@@ -681,17 +735,8 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) (results []reflect.Value)
 		}
 
 		if fn.valOut != -1 && !fn.returnValueIsChannel {
-			val := reflect.New(fn.ftyp.Out(fn.valOut))
-
-			if resp.Result != nil {
-				log.Debugw("rpc result", "type", fn.ftyp.Out(fn.valOut))
-				if err := json.Unmarshal(resp.Result, val.Interface()); err != nil {
-					log.Warnw("unmarshaling failed", "message", string(resp.Result))
-					return fn.processError(xerrors.Errorf("unmarshaling result: %w", err))
-				}
-			}
-
-			retVal = func() reflect.Value { return val.Elem() }
+			log.Debugw("rpc result", "type", ty)
+			retVal = func() reflect.Value { return resp.Result.value }
 		}
 		retry := resp.Error != nil && resp.Error.Code == eTempWSError && fn.retry
 		if !retry {

@@ -27,16 +27,16 @@ var debugTrace = os.Getenv("JSONRPC_ENABLE_DEBUG_TRACE") == "1"
 type frame struct {
 	// common
 	Jsonrpc string            `json:"jsonrpc"`
-	ID      interface{}       `json:"id,omitempty"`
-	Meta    map[string]string `json:"meta,omitempty"`
+	ID      interface{}       `json:"id,omitzero"`
+	Meta    map[string]string `json:"meta,omitzero"`
 
 	// request
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
+	Method string          `json:"method,omitzero"`
+	Params json.RawMessage `json:"params,omitzero"`
 
 	// response
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *JSONRPCError   `json:"error,omitempty"`
+	Result resultValue   `json:"result,omitzero"`
+	Error  *JSONRPCError `json:"error,omitzero"`
 }
 
 type outChanReg struct {
@@ -436,12 +436,11 @@ func (c *wsConn) handleResponse(frame frame) {
 		return
 	}
 
-	if req.retCh != nil && frame.Result != nil {
+	if req.retCh != nil && frame.Result.value.IsValid() {
 		// output is channel
-		var chid uint64
-		if err := json.Unmarshal(frame.Result, &chid); err != nil {
-			log.Errorf("failed to unmarshal channel id response: %s, data '%s'", err, string(frame.Result))
-			return
+		chid, ok := reflect.TypeAssert[uint64](frame.Result.value)
+		if !ok {
+			log.Errorf("failed when unmarshal channel id response")
 		}
 
 		chanCtx, chHnd := req.retCh()
@@ -670,10 +669,23 @@ func (c *wsConn) frameExecutor(ctx context.Context) {
 			return
 		case buf := <-c.frameExecQueue:
 			var frame frame
+			frame.Result.functy = func() reflect.Type {
+				req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
+				if !ok {
+					return nil
+				}
+				return req.respType
+			}
 			if err := json.Unmarshal(buf, &frame); err != nil {
 				log.Warnw("failed to unmarshal frame", "error", err)
-				// todo send invalid request response
-				continue
+				if frame.ID != nil {
+					frame.Error = &JSONRPCError{
+						Code:    eTempWSError,
+						Message: fmt.Sprintf("RPC client error: unmarshaling result: %s", err)}
+				} else {
+					// todo send invalid request response
+					continue
+				}
 			}
 
 			var err error
