@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"reflect"
 	"sync"
@@ -78,20 +79,17 @@ type wsConn struct {
 	// ////
 	// Client related
 
-	// inflight are requests we've sent to the remote
-	inflight   map[interface{}]clientRequest
-	inflightLk sync.Mutex
+	// inflight are requests we've sent to the remote, value type: [clientRequest]
+	inflight sync.Map
 
-	// chanHandlers is a map of client-side channel handlers
-	chanHandlersLk sync.Mutex
-	chanHandlers   map[uint64]*chanHandler
+	// chanHandlers is a map of client-side channel handlers, value type [*chanHandler]
+	chanHandlers sync.Map
 
 	// ////
 	// Server related
 
-	// handling are the calls we handle
-	handling   map[interface{}]context.CancelFunc
-	handlingLk sync.Mutex
+	// handling are the calls we handle, value type: [context.CancelFunc]
+	handling sync.Map
 
 	spawnOutChanHandlerOnce sync.Once
 
@@ -99,6 +97,23 @@ type wsConn struct {
 	chanCtr uint64
 
 	registerCh chan outChanReg
+}
+
+func loadAssert[T any](loadf func(any) (any, bool), key any) (t T, ok bool) {
+	v, ok := loadf(key)
+	if !ok {
+		return t, false
+	}
+	t, ok = v.(T)
+	return
+}
+
+func rangeAssertValue[T any](rangef iter.Seq2[any, any]) iter.Seq2[any, T] {
+	return func(yield func(any, T) bool) {
+		rangef(func(k, v any) bool {
+			return yield(k, v.(T))
+		})
+	}
 }
 
 type chanHandler struct {
@@ -354,12 +369,9 @@ func (c *wsConn) cancelCtx(req frame) {
 		return
 	}
 
-	c.handlingLk.Lock()
-	defer c.handlingLk.Unlock()
-
-	cf, ok := c.handling[id]
+	cf, ok := c.handling.Load(id)
 	if ok {
-		cf()
+		cf.(context.CancelFunc)()
 	}
 }
 
@@ -380,18 +392,14 @@ func (c *wsConn) handleChanMessage(frame frame) {
 		return
 	}
 
-	c.chanHandlersLk.Lock()
-	hnd, ok := c.chanHandlers[chid]
+	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.Load, chid)
 	if !ok {
-		c.chanHandlersLk.Unlock()
 		log.Errorf("xrpc.ch.val: handler %d not found", chid)
 		return
 	}
 
 	hnd.lk.Lock()
 	defer hnd.lk.Unlock()
-
-	c.chanHandlersLk.Unlock()
 
 	hnd.cb(params[1].data, true)
 }
@@ -409,10 +417,8 @@ func (c *wsConn) handleChanClose(frame frame) {
 		return
 	}
 
-	c.chanHandlersLk.Lock()
-	hnd, ok := c.chanHandlers[chid]
+	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.LoadAndDelete, chid)
 	if !ok {
-		c.chanHandlersLk.Unlock()
 		log.Errorf("xrpc.ch.val: handler %d not found", chid)
 		return
 	}
@@ -420,17 +426,11 @@ func (c *wsConn) handleChanClose(frame frame) {
 	hnd.lk.Lock()
 	defer hnd.lk.Unlock()
 
-	delete(c.chanHandlers, chid)
-
-	c.chanHandlersLk.Unlock()
-
 	hnd.cb(nil, false)
 }
 
 func (c *wsConn) handleResponse(frame frame) {
-	c.inflightLk.Lock()
-	req, ok := c.inflight[frame.ID]
-	c.inflightLk.Unlock()
+	req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
 	if !ok {
 		log.Error("client got unknown ID in response")
 		return
@@ -446,9 +446,7 @@ func (c *wsConn) handleResponse(frame frame) {
 
 		chanCtx, chHnd := req.retCh()
 
-		c.chanHandlersLk.Lock()
-		c.chanHandlers[chid] = &chanHandler{cb: chHnd}
-		c.chanHandlersLk.Unlock()
+		c.chanHandlers.Store(chid, &chanHandler{cb: chHnd})
 
 		go c.handleCtxAsync(chanCtx, frame.ID)
 	}
@@ -459,9 +457,7 @@ func (c *wsConn) handleResponse(frame frame) {
 		ID:      frame.ID,
 		Error:   frame.Error,
 	}
-	c.inflightLk.Lock()
-	delete(c.inflight, frame.ID)
-	c.inflightLk.Unlock()
+	c.inflight.Delete(frame.ID)
 }
 
 func (c *wsConn) handleCall(ctx context.Context, frame frame) {
@@ -491,17 +487,12 @@ func (c *wsConn) handleCall(ctx context.Context, frame frame) {
 	if frame.ID != nil {
 		nextWriter = c.nextWriter
 
-		c.handlingLk.Lock()
-		c.handling[frame.ID] = cancel
-		c.handlingLk.Unlock()
+		c.handling.Store(frame.ID, cancel)
 
 		done = func(keepctx bool) {
-			c.handlingLk.Lock()
-			defer c.handlingLk.Unlock()
-
 			if !keepctx {
 				cancel()
-				delete(c.handling, frame.ID)
+				c.handling.Delete(frame.ID)
 			}
 		}
 	}
@@ -530,8 +521,7 @@ func (c *wsConn) handleFrame(ctx context.Context, frame frame) {
 }
 
 func (c *wsConn) closeInFlight() {
-	c.inflightLk.Lock()
-	for id, req := range c.inflight {
+	for id, req := range rangeAssertValue[clientRequest](c.inflight.Range) {
 		req.ready <- clientResponse{
 			Jsonrpc: "2.0",
 			ID:      id,
@@ -541,36 +531,20 @@ func (c *wsConn) closeInFlight() {
 			},
 		}
 	}
-	c.inflight = map[interface{}]clientRequest{}
-	c.inflightLk.Unlock()
-
-	c.handlingLk.Lock()
-	for _, cancel := range c.handling {
+	c.inflight = sync.Map{}
+	for _, cancel := range rangeAssertValue[context.CancelFunc](c.handling.Range) {
 		cancel()
 	}
-	c.handling = map[interface{}]context.CancelFunc{}
-	c.handlingLk.Unlock()
-
+	c.handling = sync.Map{}
 }
 
 func (c *wsConn) closeChans() {
-	c.chanHandlersLk.Lock()
-	defer c.chanHandlersLk.Unlock()
-
-	for chid := range c.chanHandlers {
-		hnd := c.chanHandlers[chid]
-
+	for _, hnd := range rangeAssertValue[*chanHandler](c.chanHandlers.Range) {
 		hnd.lk.Lock()
-
-		delete(c.chanHandlers, chid)
-
-		c.chanHandlersLk.Unlock()
-
 		hnd.cb(nil, false)
-
 		hnd.lk.Unlock()
-		c.chanHandlersLk.Lock()
 	}
+	c.chanHandlers = sync.Map{}
 }
 
 func (c *wsConn) setupPings() func() {
@@ -724,9 +698,6 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 	c.incoming = make(chan io.Reader)
 	c.readError = make(chan error, 1)
 	c.frameExecQueue = make(chan []byte, maxQueuedFrames)
-	c.inflight = map[interface{}]clientRequest{}
-	c.handling = map[interface{}]context.CancelFunc{}
-	c.chanHandlers = map[uint64]*chanHandler{}
 	c.pongs = make(chan struct{}, 1)
 
 	c.registerCh = make(chan outChanReg)
@@ -823,9 +794,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 					c.writeLk.Unlock()
 					break
 				}
-				c.inflightLk.Lock()
-				c.inflight[req.req.ID] = req
-				c.inflightLk.Unlock()
+				c.inflight.Store(req.req.ID, req)
 			}
 			c.writeLk.Unlock()
 			serr := c.sendRequest(req.req)

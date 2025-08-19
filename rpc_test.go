@@ -333,7 +333,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal string into Go value of type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -444,7 +444,7 @@ func TestRPCHttpClient(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal string into Go value of type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
