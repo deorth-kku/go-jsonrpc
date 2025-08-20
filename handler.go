@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"reflect"
@@ -20,9 +21,9 @@ import (
 	"github.com/filecoin-project/go-jsonrpc/metrics"
 )
 
-type RawParams json.RawMessage
+type RawParams jsontext.Value
 
-var rtRawParams = reflect.TypeOf(RawParams{})
+var rtRawParams = reflect.TypeFor[RawParams]()
 
 // todo is there a better way to tell 'struct with any number of fields'?
 func DecodeParams[T any](p RawParams) (T, error) {
@@ -55,8 +56,20 @@ type request struct {
 	Jsonrpc string            `json:"jsonrpc"`
 	ID      interface{}       `json:"id,omitempty"`
 	Method  string            `json:"method"`
-	Params  json.RawMessage   `json:"params"`
+	Params  jsontext.Value    `json:"params"`
 	Meta    map[string]string `json:"meta,omitempty"`
+}
+
+var _ json.UnmarshalerFrom = (*request)(nil)
+
+func (f *request) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type t0 request
+	err := json.UnmarshalDecode(dec, (*t0)(f))
+	if err != nil {
+		return err
+	}
+	f.ID, err = normalizeID(f.ID)
+	return err
 }
 
 // Limit request size. Ideally this limit should be specific for each field
@@ -194,7 +207,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	if bufferedRequest.Bytes()[0] == '[' && bufferedRequest.Bytes()[reqSize-1] == ']' {
 		var reqs []request
 
-		if err := json.NewDecoder(bufferedRequest).Decode(&reqs); err != nil {
+		if err := json.UnmarshalRead(bufferedRequest, &reqs); err != nil {
 			rpcError(wf, nil, rpcParseError, xerrors.New("Parse error"))
 			return
 		}
@@ -206,11 +219,6 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 
 		_, _ = w.Write([]byte("[")) // todo consider handling this error
 		for idx, req := range reqs {
-			if req.ID, err = normalizeID(req.ID); err != nil {
-				rpcError(wf, &req, rpcParseError, xerrors.Errorf("failed to parse ID: %w", err))
-				return
-			}
-
 			s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
 
 			if idx != len(reqs)-1 {
@@ -220,16 +228,10 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 		_, _ = w.Write([]byte("]")) // todo consider handling this error
 	} else {
 		var req request
-		if err := json.NewDecoder(bufferedRequest).Decode(&req); err != nil {
+		if err := json.UnmarshalRead(bufferedRequest, &req); err != nil {
 			rpcError(wf, &req, rpcParseError, xerrors.New("Parse error"))
 			return
 		}
-
-		if req.ID, err = normalizeID(req.ID); err != nil {
-			rpcError(wf, &req, rpcParseError, xerrors.Errorf("failed to parse ID: %w", err))
-			return
-		}
-
 		s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
 	}
 }
@@ -374,7 +376,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			dec, found := s.paramDecoders[typ]
 			if !found {
 				rp = reflect.New(typ)
-				if err := json.NewDecoder(bytes.NewReader(ps[i].data)).Decode(rp.Interface()); err != nil {
+				if err := json.Unmarshal(ps[i].data, rp.Interface()); err != nil {
 					rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 					stats.Record(ctx, metrics.RPCRequestError.M(1))
 					return
@@ -467,7 +469,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	}
 
 	withLazyWriter(w, func(w io.Writer) {
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
+		if err := json.MarshalWrite(w, resp); err != nil {
 			log.Error(err)
 			stats.Record(ctx, metrics.RPCResponseError.M(1))
 			return

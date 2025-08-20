@@ -40,6 +40,18 @@ type frame struct {
 	Error  *JSONRPCError `json:"error,omitzero"`
 }
 
+var _ json.UnmarshalerFrom = (*frame)(nil)
+
+func (f *frame) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type t0 frame
+	err := json.UnmarshalDecode(dec, (*t0)(f))
+	if err != nil {
+		return err
+	}
+	f.ID, err = normalizeID(f.ID)
+	return err
+}
+
 type outChanReg struct {
 	reqID interface{}
 
@@ -679,14 +691,6 @@ func (c *wsConn) frameExecutor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case frame := <-c.frameExecQueue:
-			var err error
-			frame.ID, err = normalizeID(frame.ID)
-			if err != nil {
-				log.Warnw("failed to normalize frame id", "error", err)
-				// todo send invalid request response
-				continue
-			}
-
 			c.handleFrame(ctx, frame)
 		}
 	}

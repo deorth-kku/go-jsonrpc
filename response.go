@@ -1,7 +1,8 @@
 package jsonrpc
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 
@@ -10,12 +11,17 @@ import (
 
 type response struct {
 	Jsonrpc string        `json:"jsonrpc"`
-	Result  interface{}   `json:"result,omitempty"`
-	ID      interface{}   `json:"id"`
-	Error   *JSONRPCError `json:"error,omitempty"`
+	Result  interface{}   `json:"result,omitzero"`
+	ID      interface{}   `json:"id,omitzero"`
+	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
-func (r response) MarshalJSON() ([]byte, error) {
+var (
+	_ json.UnmarshalerFrom = (*response)(nil)
+	_ json.MarshalerTo     = (*response)(nil)
+)
+
+func (r response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	// Custom marshal logic as per JSON-RPC 2.0 spec:
 	// > `result`:
 	// > This member is REQUIRED on success.
@@ -24,24 +30,47 @@ func (r response) MarshalJSON() ([]byte, error) {
 	// > `error`:
 	// > This member is REQUIRED on error.
 	// > This member MUST NOT exist if there was no error triggered during invocation.
-	data := map[string]interface{}{
-		"jsonrpc": r.Jsonrpc,
-		"id":      r.ID,
-	}
 
-	if r.Error != nil {
-		data["error"] = r.Error
-	} else {
-		data["result"] = r.Result
+	err := enc.WriteToken(jsontext.BeginObject)
+	if err != nil {
+		return err
 	}
-	return json.Marshal(data)
+	m := common.PairSlice[string, any]{
+		common.NewPair("jsonrpc", any(r.Jsonrpc)),
+		common.NewPair("id", r.ID),
+		common.NewPair("result", r.Result),
+	}
+	if r.Error != nil {
+		m[2] = common.NewPair("error", any(r.Error))
+	}
+	for k, v := range m.Range {
+		err = json.MarshalEncode(enc, k)
+		if err != nil {
+			return err
+		}
+		err = json.MarshalEncode(enc, v)
+		if err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndObject)
+}
+
+func (f *response) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type t0 response
+	err := json.UnmarshalDecode(dec, (*t0)(f))
+	if err != nil {
+		return err
+	}
+	f.ID, err = normalizeID(f.ID)
+	return err
 }
 
 type JSONRPCError struct {
-	Code    ErrorCode       `json:"code"`
-	Message string          `json:"message"`
-	Meta    json.RawMessage `json:"meta,omitempty"`
-	Data    interface{}     `json:"data,omitempty"`
+	Code    ErrorCode      `json:"code"`
+	Message string         `json:"message"`
+	Meta    jsontext.Value `json:"meta,omitzero"`
+	Data    interface{}    `json:"data,omitzero"`
 }
 
 func (e *JSONRPCError) Error() string {

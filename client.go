@@ -112,6 +112,16 @@ type clientResponse struct {
 	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
+func (f *clientResponse) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type t0 clientResponse
+	err := json.UnmarshalDecode(dec, (*t0)(f))
+	if err != nil {
+		return err
+	}
+	f.ID, err = normalizeID(f.ID)
+	return err
+}
+
 type makeChanSink func() (context.Context, func([]byte, bool))
 
 type clientRequest struct {
@@ -213,10 +223,6 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 				return clientResponse{}, xerrors.Errorf("unmarshaling response: %w", err)
 			}
 
-			if resp.ID, err = normalizeID(resp.ID); err != nil {
-				return clientResponse{}, xerrors.Errorf("failed to response ID: %w", err)
-			}
-
 			if resp.ID != cr.req.ID {
 				return clientResponse{}, xerrors.New("request and response id didn't match")
 			}
@@ -286,10 +292,6 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 		if cr.req.ID != nil { // non-notification
 			if err := json.UnmarshalRead(httpResp.Body, &resp); err != nil {
 				return clientResponse{}, xerrors.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
-			}
-
-			if resp.ID, err = normalizeID(resp.ID); err != nil {
-				return clientResponse{}, xerrors.Errorf("failed to response ID: %w", err)
 			}
 
 			if resp.ID != cr.req.ID {
@@ -630,18 +632,12 @@ func (fn *rpcFunc) processError(err error) []reflect.Value {
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	var id interface{}
 	if !fn.notify {
-		id = atomic.AddInt64(&fn.client.idCtr, 1)
-
+		id = float64(atomic.AddInt64(&fn.client.idCtr, 1))
 		// Prepare the ID to send on the wire.
 		// We track int64 ids as float64 in the inflight map (because that's what
 		// they'll be decoded to). encoding/json outputs numbers with their minimal
 		// encoding, avoding the decimal point when possible, i.e. 3 will never get
 		// converted to 3.0.
-		var err error
-		id, err = normalizeID(id)
-		if err != nil {
-			return fn.processError(fmt.Errorf("failed to normalize id")) // should probably panic
-		}
 	}
 
 	var serializedParams jsontext.Value

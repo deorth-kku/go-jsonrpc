@@ -333,7 +333,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -444,7 +444,7 @@ func TestRPCHttpClient(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -1264,13 +1264,12 @@ func TestIDHandling(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%v", tc.expect), func(t *testing.T) {
-			dec := json.NewDecoder(strings.NewReader(tc.str))
-			require.NoError(t, dec.Decode(&decoded))
-			if id, err := normalizeID(decoded.ID); !tc.expectErr {
-				require.NoError(t, err)
-				require.Equal(t, tc.expect, id)
-			} else {
+			err := json.NewDecoder(strings.NewReader(tc.str)).Decode(&decoded)
+			if tc.expectErr {
 				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.expect, decoded.ID)
 			}
 		})
 	}
