@@ -2,7 +2,8 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -31,8 +32,8 @@ type frame struct {
 	Meta    map[string]string `json:"meta,omitzero"`
 
 	// request
-	Method string          `json:"method,omitzero"`
-	Params json.RawMessage `json:"params,omitzero"`
+	Method string         `json:"method,omitzero"`
+	Params jsontext.Value `json:"params,omitzero"`
 
 	// response
 	Result resultValue   `json:"result,omitzero"`
@@ -71,7 +72,7 @@ type wsConn struct {
 
 	readError chan error
 
-	frameExecQueue chan []byte
+	frameExecQueue chan frame
 
 	// outgoing messages
 	writeLk sync.Mutex
@@ -232,7 +233,7 @@ func (c *wsConn) handleOutChans() {
 					Result:  registration.chID,
 				}
 
-				if err := json.NewEncoder(w).Encode(resp); err != nil {
+				if err := json.MarshalWrite(w, resp); err != nil {
 					log.Error(err)
 					return
 				}
@@ -643,17 +644,27 @@ func (c *wsConn) tryReconnect(ctx context.Context) bool {
 func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 	// debug util - dump all messages to stderr
 	// r = io.TeeReader(r, os.Stderr)
-
-	// json.NewDecoder(r).Decode would read the whole frame as well, so might as well do it
-	// with ReadAll which should be much faster
-	// use a autoResetReader in case the read takes a long time
-	buf, err := io.ReadAll(c.autoResetReader(r)) // todo buffer pool
-	if err != nil {
-		c.readError <- xerrors.Errorf("reading frame into a buffer: %w", err)
-		return
+	var frame frame
+	frame.Result.functy = func() reflect.Type {
+		req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
+		if !ok {
+			return nil
+		}
+		return req.respType
 	}
-
-	c.frameExecQueue <- buf
+	// use a autoResetReader in case the read takes a long time
+	if err := json.UnmarshalRead(c.autoResetReader(r), &frame); err != nil {
+		log.Warnw("failed to unmarshal frame", "error", err)
+		if frame.ID != nil {
+			frame.Error = &JSONRPCError{
+				Code:    eTempWSError,
+				Message: fmt.Sprintf("RPC client error: unmarshaling result: %s", errors.Unwrap(err))}
+		} else {
+			c.readError <- xerrors.Errorf("reading frame into a buffer: %w", err)
+			return
+		}
+	}
+	c.frameExecQueue <- frame
 	if len(c.frameExecQueue) > 2*cap(c.frameExecQueue)/3 { // warn at 2/3 capacity
 		log.Warnw("frame executor queue is backlogged", "queued", len(c.frameExecQueue), "cap", cap(c.frameExecQueue))
 	}
@@ -667,27 +678,7 @@ func (c *wsConn) frameExecutor(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case buf := <-c.frameExecQueue:
-			var frame frame
-			frame.Result.functy = func() reflect.Type {
-				req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
-				if !ok {
-					return nil
-				}
-				return req.respType
-			}
-			if err := json.Unmarshal(buf, &frame); err != nil {
-				log.Warnw("failed to unmarshal frame", "error", err)
-				if frame.ID != nil {
-					frame.Error = &JSONRPCError{
-						Code:    eTempWSError,
-						Message: fmt.Sprintf("RPC client error: unmarshaling result: %s", err)}
-				} else {
-					// todo send invalid request response
-					continue
-				}
-			}
-
+		case frame := <-c.frameExecQueue:
 			var err error
 			frame.ID, err = normalizeID(frame.ID)
 			if err != nil {
@@ -709,7 +700,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 
 	c.incoming = make(chan io.Reader)
 	c.readError = make(chan error, 1)
-	c.frameExecQueue = make(chan []byte, maxQueuedFrames)
+	c.frameExecQueue = make(chan frame, maxQueuedFrames)
 	c.pongs = make(chan struct{}, 1)
 
 	c.registerCh = make(chan outChanReg)
