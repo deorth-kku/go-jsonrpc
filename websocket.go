@@ -658,7 +658,7 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 		if frame.ID != nil {
 			frame.Error = &JSONRPCError{
 				Code:    eTempWSError,
-				Message: fmt.Sprintf("RPC client error: unmarshaling result: %s", errors.Unwrap(err))}
+				Message: fmt.Sprintf("RPC client error: unmarshaling frame: %s", err)}
 		} else {
 			c.readError <- xerrors.Errorf("reading frame into a buffer: %w", err)
 			return

@@ -670,7 +670,7 @@ func TestUnmarshalableResult(t *testing.T) {
 	defer closer()
 
 	_, err = client.GetUnUnmarshalableStuff()
-	require.EqualError(t, err, "RPC client error: unmarshaling result: nope")
+	require.EqualError(t, err, "RPC client error: unmarshaling frame: json: cannot unmarshal JSON number into Go jsonrpc.UnUnmarshalable within \"/result\": nope")
 }
 
 type ChanHandler struct {
