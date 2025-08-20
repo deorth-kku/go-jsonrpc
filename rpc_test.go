@@ -1749,3 +1749,43 @@ type MethodTransformedHandler struct{}
 func (h *RawParamHandler) CallSomethingInSnakeCase(ctx context.Context, v int) (int, error) {
 	return v + 1, nil
 }
+
+type nilcheckerserver struct{}
+
+func (nilcheckerserver) CheckMapNil(m map[string]struct{}, isNil bool) error {
+	if (m == nil) == isNil {
+		return nil
+	}
+	return errors.New("map nil not matched")
+}
+
+func (nilcheckerserver) CheckSliceNil(m []struct{}, isNil bool) error {
+	if (m == nil) == isNil {
+		return nil
+	}
+	return errors.New("slice nil not matched")
+}
+
+func TestNilRoundTrip(t *testing.T) {
+	serverHandler := nilcheckerserver{}
+	rpcServer := NewServer()
+	rpcServer.Register("NilCheckerServer", serverHandler)
+
+	var client struct {
+		CheckSliceNil func(m []struct{}, isNil bool) error
+		CheckMapNil   func(m map[string]struct{}, isNil bool) error
+	}
+
+	testServ := httptest.NewServer(rpcServer)
+	defer testServ.Close()
+	// setup client
+
+	closer, err := NewClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "NilCheckerServer", &client, nil)
+	require.NoError(t, err)
+	defer closer()
+
+	require.NoError(t, client.CheckMapNil(nil, true))
+	require.NoError(t, client.CheckMapNil(make(map[string]struct{}), false))
+	require.NoError(t, client.CheckSliceNil(nil, true))
+	require.NoError(t, client.CheckSliceNil(make([]struct{}, 0), false))
+}

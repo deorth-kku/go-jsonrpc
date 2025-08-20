@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -245,7 +246,7 @@ func (c *wsConn) handleOutChans() {
 					Result:  registration.chID,
 				}
 
-				if err := json.MarshalWrite(w, resp); err != nil {
+				if err := json.MarshalWrite(w, resp, v1.DefaultOptionsV1()); err != nil {
 					log.Error(err)
 					return
 				}
@@ -279,7 +280,7 @@ func (c *wsConn) handleOutChans() {
 			cases = cases[:n]
 			caseToID = caseToID[:n-internal]
 
-			rp, err := json.Marshal([]param{{v: reflect.ValueOf(id)}})
+			rp, err := v1.Marshal([]param{{v: reflect.ValueOf(id)}})
 			if err != nil {
 				log.Error(err)
 				continue
@@ -297,7 +298,7 @@ func (c *wsConn) handleOutChans() {
 		}
 
 		// forward message
-		rp, err := json.Marshal([]param{{v: reflect.ValueOf(caseToID[chosen-internal])}, {v: val}})
+		rp, err := v1.Marshal([]param{{v: reflect.ValueOf(caseToID[chosen-internal])}, {v: val}})
 		if err != nil {
 			log.Errorw("marshaling params for sendRequest failed", "err", err)
 			continue
@@ -349,7 +350,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req interface{}) error {
 func (c *wsConn) handleCtxAsync(actx context.Context, id interface{}) {
 	<-actx.Done()
 
-	rp, err := json.Marshal([]param{{v: reflect.ValueOf(id)}})
+	rp, err := v1.Marshal([]param{{v: reflect.ValueOf(id)}})
 	if err != nil {
 		log.Errorw("marshaling params for sendRequest failed", "err", err)
 		return

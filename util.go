@@ -1,11 +1,13 @@
 package jsonrpc
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -15,18 +17,25 @@ type param struct {
 	v reflect.Value // to marshal
 }
 
-func (p *param) UnmarshalJSON(raw []byte) error {
-	p.data = make([]byte, len(raw))
-	copy(p.data, raw)
+var (
+	_ json.UnmarshalerFrom = (*param)(nil)
+	_ json.MarshalerTo     = (*param)(nil)
+)
+
+func (p *param) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	v, err := dec.ReadValue()
+	if err != nil {
+		return err
+	}
+	p.data = slices.Clone(v)
 	return nil
 }
 
-func (p *param) MarshalJSON() ([]byte, error) {
+func (p *param) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if p.v.Kind() == reflect.Invalid {
-		return p.data, nil
+		return enc.WriteValue(p.data)
 	}
-
-	return json.Marshal(p.v.Interface())
+	return json.MarshalEncode(enc, p.v.Interface())
 }
 
 // processFuncOut finds value and error Outs in function

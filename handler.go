@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -469,7 +470,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	}
 
 	withLazyWriter(w, func(w io.Writer) {
-		if err := json.MarshalWrite(w, resp); err != nil {
+		if err := json.MarshalWrite(w, resp, v1.DefaultOptionsV1()); err != nil {
 			log.Error(err)
 			stats.Record(ctx, metrics.RPCResponseError.M(1))
 			return

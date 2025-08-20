@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"context"
 	"encoding/base64"
+	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -200,7 +201,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 	c.exiting = stop
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := json.Marshal(&cr.req)
+		b, err := v1.Marshal(&cr.req)
 		if err != nil {
 			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
 		}
@@ -256,7 +257,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	}
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := json.Marshal(&cr.req)
+		b, err := v1.Marshal(&cr.req)
 		if err != nil {
 			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
 		}
@@ -412,7 +413,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 			case <-ctxDone: // send cancel request
 				ctxDone = nil
 
-				rp, err := json.Marshal([]param{{v: reflect.ValueOf(cr.req.ID)}})
+				rp, err := v1.Marshal([]param{{v: reflect.ValueOf(cr.req.ID)}})
 				if err != nil {
 					return clientResponse{}, xerrors.Errorf("marshalling cancel request: %w", err)
 				}
@@ -662,7 +663,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 			}
 		}
 		var err error
-		serializedParams, err = json.Marshal(params)
+		serializedParams, err = v1.Marshal(params)
 		if err != nil {
 			return fn.processError(fmt.Errorf("marshaling params failed: %w", err))
 		}
