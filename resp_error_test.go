@@ -1,7 +1,8 @@
 package jsonrpc
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 
@@ -75,7 +76,7 @@ func (e *DataComplexError) Error() string {
 
 func (e *DataComplexError) FromJSONRPCError(jerr JSONRPCError) error {
 	e.Message = jerr.Message
-	data, ok := jerr.Data.(json.RawMessage)
+	data, ok := jerr.Data.(jsontext.Value)
 	if !ok {
 		return fmt.Errorf("expected string data, got %T", jerr.Data)
 	}
@@ -222,7 +223,7 @@ func TestRespErrorVal(t *testing.T) {
 			respError: &JSONRPCError{
 				Code:    1003,
 				Message: "data error occurred",
-				Data:    json.RawMessage(`{"foo":"boop","bar":101}`),
+				Data:    jsontext.Value(`{"foo":"boop","bar":101}`),
 			},
 			expectedType:    &DataComplexError{},
 			expectedMessage: "data error occurred",
@@ -235,7 +236,7 @@ func TestRespErrorVal(t *testing.T) {
 			respError: &JSONRPCError{
 				Code:    1004,
 				Message: "meta error occurred",
-				Meta: func() json.RawMessage {
+				Meta: func() jsontext.Value {
 					me := &MetaError{
 						Message: "meta error occurred",
 						Details: "meta details",
@@ -256,8 +257,8 @@ func TestRespErrorVal(t *testing.T) {
 			respError: &JSONRPCError{
 				Code:    1005,
 				Message: "complex error occurred",
-				Data:    json.RawMessage(`"complex data"`),
-				Meta: func() json.RawMessage {
+				Data:    jsontext.Value(`"complex data"`),
+				Meta: func() jsontext.Value {
 					ce := &ComplexError{
 						Message: "complex error occurred",
 						Details: "complex details",
@@ -279,18 +280,17 @@ func TestRespErrorVal(t *testing.T) {
 			respError: &JSONRPCError{
 				Code:    9999,
 				Message: "unregistered error occurred",
-				Data:    json.RawMessage(`"some data"`),
+				Data:    jsontext.Value(`"some data"`),
 			},
 			expectedType:    &JSONRPCError{},
 			expectedMessage: "unregistered error occurred",
 			verify: func(t *testing.T, err error) {
-				require.Equal(t, json.RawMessage(`"some data"`), err.(*JSONRPCError).Data)
+				require.Equal(t, jsontext.Value(`"some data"`), err.(*JSONRPCError).Data)
 			},
 		},
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			errValue := tc.respError.val(&errorsMap)
 			errInterface := errValue.Interface()

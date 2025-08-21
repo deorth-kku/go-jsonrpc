@@ -3,7 +3,8 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -84,6 +85,15 @@ func (h *SimpleServerHandler) StringMatch(t TestType, i2 int64) (out TestOut, er
 	return
 }
 
+func removeSpaces(jsonStr string) (string, error) {
+	value := jsontext.Value(jsonStr)
+	err := value.Format()
+	if err != nil {
+		return "", err
+	}
+	return string(value), nil
+}
+
 func TestRawRequests(t *testing.T) {
 	rpcHandler := SimpleServerHandler{}
 
@@ -92,21 +102,6 @@ func TestRawRequests(t *testing.T) {
 
 	testServ := httptest.NewServer(rpcServer)
 	defer testServ.Close()
-
-	removeSpaces := func(jsonStr string) (string, error) {
-		var jsonObj interface{}
-		err := json.Unmarshal([]byte(jsonStr), &jsonObj)
-		if err != nil {
-			return "", err
-		}
-
-		compactJSONBytes, err := json.Marshal(jsonObj)
-		if err != nil {
-			return "", err
-		}
-
-		return string(compactJSONBytes), nil
-	}
 
 	tc := func(req, resp string, n int32, statusCode int) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -138,7 +133,7 @@ func TestRawRequests(t *testing.T) {
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 5}`, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}`, 0, 500))
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 6}]`, `[{"jsonrpc":"2.0","id":6,"result":null}]`, 123, 200))
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 7},{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-122], "id": 8}]`, `[{"jsonrpc":"2.0","id":7,"result":null},{"jsonrpc":"2.0","id":8,"result":null}]`, 1, 200))
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 9},{"jsonrpc": "2.0", "params": [-122], "id": 10}]`, `[{"jsonrpc":"2.0","id":9,"result":null},{"error":{"code":-32601,"message":"method '' not found"},"id":10,"jsonrpc":"2.0"}]`, 123, 200))
+	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 9},{"jsonrpc": "2.0", "params": [-122], "id": 10}]`, `[{"jsonrpc":"2.0","id":9,"result":null},{"jsonrpc":"2.0","id":10,"error":{"code":-32601,"message":"method '' not found"}}]`, 123, 200))
 	t.Run("add", tc(`     [{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-1], "id": 11}]   `, `[{"jsonrpc":"2.0","id":11,"result":null}]`, -1, 200))
 	t.Run("add", tc(``, `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}`, 0, 400))
 }
@@ -1242,8 +1237,6 @@ func TestUserError(t *testing.T) {
 
 // Unit test for request/response ID translation.
 func TestIDHandling(t *testing.T) {
-	var decoded request
-
 	cases := []struct {
 		str       string
 		expect    interface{}
@@ -1264,7 +1257,8 @@ func TestIDHandling(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%v", tc.expect), func(t *testing.T) {
-			err := json.NewDecoder(strings.NewReader(tc.str)).Decode(&decoded)
+			var decoded request
+			err := json.UnmarshalRead(strings.NewReader(tc.str), &decoded)
 			if tc.expectErr {
 				require.Error(t, err)
 			} else {
