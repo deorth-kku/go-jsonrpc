@@ -449,12 +449,24 @@ func (c *wsConn) handleResponse(frame frame) {
 		log.Error("client got unknown ID in response")
 		return
 	}
+	defer c.inflight.Delete(frame.ID)
+
+	if err := frame.Result.deferredUnmarshal(req.respType); err != nil {
+		req.ready <- clientResponse{
+			Jsonrpc: frame.Jsonrpc,
+			ID:      frame.ID,
+			Error: &JSONRPCError{
+				Code:    eTempWSError,
+				Message: err.Error(),
+			},
+		}
+	}
 
 	if req.retCh != nil && frame.Result.value.IsValid() {
 		// output is channel
 		chid, ok := reflect.TypeAssert[uint64](frame.Result.value)
 		if !ok {
-			log.Errorf("failed when unmarshal channel id response")
+			log.Error("failed when unmarshal channel id response")
 		}
 
 		chanCtx, chHnd := req.retCh()
@@ -470,7 +482,6 @@ func (c *wsConn) handleResponse(frame frame) {
 		ID:      frame.ID,
 		Error:   frame.Error,
 	}
-	c.inflight.Delete(frame.ID)
 }
 
 func (c *wsConn) handleCall(ctx context.Context, frame frame) {

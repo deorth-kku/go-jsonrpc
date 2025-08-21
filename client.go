@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime/pprof"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -82,7 +83,6 @@ var (
 
 	reflectUint64Type = reflect.TypeFor[uint64]()
 	reflectyAnyType   = reflect.TypeFor[any]()
-	reflectAnyNil     = reflect.Zero(reflectyAnyType)
 )
 
 func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
@@ -92,14 +92,38 @@ func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	ty := rv.functy()
 	if ty == nil {
 		if dec.PeekKind() == 'n' {
-			rv.value = reflectAnyNil
+			rv.value = reflect.Value{}
 			return dec.SkipValue()
 		}
-		return errors.New("cannot get value type")
+		// defer unmarshal if we don't know its type atm.
+		// this should only happen for websocket clients.
+		data, err := dec.ReadValue()
+		if err != nil {
+			return err
+		}
+		data = slices.Clone(data)
+		rv.value = reflect.ValueOf(deferredData(data))
+		return nil
 	}
 	temprv := reflect.New(ty)
 	rv.value = temprv.Elem()
 	return json.UnmarshalDecode(dec, temprv.Interface())
+}
+
+type deferredData jsontext.Value
+
+// run the deffered unmarshal. if the data was already unmarshaled, it does nothing and return nil.
+func (rv *resultValue) deferredUnmarshal(ty reflect.Type) error {
+	if !rv.value.IsValid() {
+		return nil
+	}
+	data, ok := reflect.TypeAssert[deferredData](rv.value)
+	if !ok {
+		return nil
+	}
+	temprv := reflect.New(ty)
+	rv.value = temprv.Elem()
+	return v1.Unmarshal(data, temprv.Interface())
 }
 
 func (rv resultValue) MarshalJSONTo(enc *jsontext.Encoder) error {
