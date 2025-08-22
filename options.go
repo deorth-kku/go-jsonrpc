@@ -27,6 +27,7 @@ type Config struct {
 	aliasedHandlerMethods map[string]string
 
 	httpClient *http.Client
+	wsDialer   *websocket.Dialer
 
 	noReconnect      bool
 	proxyConnFactory func(func() (*websocket.Conn, error)) func() (*websocket.Conn, error) // for testing
@@ -112,6 +113,12 @@ func WithClientHandlerAlias(alias, original string) func(c *Config) {
 func WithHTTPClient(h *http.Client) func(c *Config) {
 	return func(c *Config) {
 		c.httpClient = h
+	}
+}
+
+func WithWebsocketDialer(d *websocket.Dialer) func(c *Config) {
+	return func(c *Config) {
+		c.wsDialer = d
 	}
 }
 

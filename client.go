@@ -337,8 +337,11 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 }
 
 func websocketClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
+	if config.wsDialer == nil {
+		config.wsDialer = websocket.DefaultDialer
+	}
 	connFactory := func() (*websocket.Conn, error) {
-		conn, _, err := websocket.DefaultDialer.Dial(addr, requestHeader)
+		conn, _, err := config.wsDialer.Dial(addr, requestHeader)
 		if err != nil {
 			return nil, &RPCConnectionError{xerrors.Errorf("cannot dial address %s for %w", addr, err)}
 		}
