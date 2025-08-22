@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,7 +24,6 @@ import (
 	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	logging "github.com/ipfs/go-log/v2"
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
 	"golang.org/x/xerrors"
@@ -37,8 +37,6 @@ const (
 var (
 	errorType   = reflect.TypeFor[error]()
 	contextType = reflect.TypeFor[context.Context]()
-
-	log = logging.Logger("rpc")
 
 	_defaultHTTPClient = &http.Client{
 		Transport: &http.Transport{
@@ -181,6 +179,7 @@ type client struct {
 	idCtr     int64
 
 	methodNameFormatter MethodNameFormatter
+	logger              *slog.Logger
 }
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
@@ -216,9 +215,10 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 
 	c := client{
 		namespace:           namespace,
-		paramEncoders:       config.paramEncoders,
+		paramEncoders:       config.ParamEncoders,
 		errors:              config.errors,
 		methodNameFormatter: config.methodNamer,
+		logger:              config.logger,
 	}
 
 	stop := make(chan struct{})
@@ -268,9 +268,10 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 func httpClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
 	c := client{
 		namespace:           namespace,
-		paramEncoders:       config.paramEncoders,
+		paramEncoders:       config.ParamEncoders,
 		errors:              config.errors,
 		methodNameFormatter: config.methodNamer,
+		logger:              config.logger,
 	}
 
 	stop := make(chan struct{})
@@ -336,6 +337,18 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	}, nil
 }
 
+type fakehandler struct {
+	l *slog.Logger
+}
+
+func (f fakehandler) getlogger() *slog.Logger {
+	return f.l
+}
+
+func (fakehandler) handle(context.Context, request, func(func(io.Writer)), rpcErrFunc, func(keepCtx bool), chanOut) {
+	panic("this shouldn't be called")
+}
+
 func websocketClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
 	if config.wsDialer == nil {
 		config.wsDialer = websocket.DefaultDialer
@@ -364,9 +377,10 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 
 	c := client{
 		namespace:           namespace,
-		paramEncoders:       config.paramEncoders,
+		paramEncoders:       config.ParamEncoders,
 		errors:              config.errors,
 		methodNameFormatter: config.methodNamer,
+		logger:              config.logger,
 	}
 
 	requests := c.setupRequestChan()
@@ -375,7 +389,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	exiting := make(chan struct{})
 	c.exiting = exiting
 
-	var hnd reqestHandler
+	var hnd requestHandler
 	if len(config.reverseHandlers) > 0 {
 		h := makeHandler(defaultServerConfig())
 		h.aliasedMethods = config.aliasedHandlerMethods
@@ -383,6 +397,8 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 			h.register(reverseHandler.ns, reverseHandler.hnd)
 		}
 		hnd = h
+	} else {
+		hnd = fakehandler{config.logger}
 	}
 
 	wconn := &wsConn{
@@ -456,7 +472,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 				select {
 				case requests <- cancelReq:
 				case <-c.exiting:
-					log.Warn("failed to send request cancellation, websocket routing exited")
+					c.logger.Warn("failed to send request cancellation, websocket routing exited")
 				}
 
 			}
@@ -543,9 +559,9 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 						buf.PushBack(vvval)
 						if buf.Len() > 1 {
 							if buf.Len() > 10 {
-								log.Warnw("rpc output message buffer", "n", buf.Len())
+								c.logger.Warn("rpc output message buffer", "n", buf.Len())
 							} else {
-								log.Debugw("rpc output message buffer", "n", buf.Len())
+								c.logger.Debug("rpc output message buffer", "n", buf.Len())
 							}
 						}
 					} else {
@@ -571,12 +587,12 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 
 			val := reflect.New(ftyp.Out(valOut).Elem())
 			if err := json.Unmarshal(result, val.Interface()); err != nil {
-				log.Errorf("error unmarshaling chan response: %s", err)
+				c.logger.Error("error unmarshaling chan response", "err", err)
 				return
 			}
 
 			if ctx.Err() != nil {
-				log.Errorf("got rpc message with cancelled context: %s", ctx.Err())
+				c.logger.Error("got rpc message with cancelled context", "err", ctx.Err())
 				return
 			}
 
@@ -759,7 +775,6 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		}
 
 		if fn.valOut != -1 && !fn.returnValueIsChannel {
-			log.Debugw("rpc result", "type", ty)
 			retVal = func() reflect.Value { return resp.Result.value }
 		}
 		retry := resp.Error != nil && resp.Error.Code == eTempWSError && fn.retry

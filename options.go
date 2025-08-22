@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"log/slog"
 	"net/http"
 	"reflect"
 	"time"
@@ -20,7 +21,7 @@ type Config struct {
 	pingInterval     time.Duration
 	timeout          time.Duration
 
-	paramEncoders map[reflect.Type]ParamEncoder
+	ParamEncoders map[reflect.Type]ParamEncoder
 	errors        *Errors
 
 	reverseHandlers       []clientHandler
@@ -33,6 +34,11 @@ type Config struct {
 	proxyConnFactory func(func() (*websocket.Conn, error)) func() (*websocket.Conn, error) // for testing
 
 	methodNamer MethodNameFormatter
+	logger      *slog.Logger
+}
+
+func (c *Config) GetLogger() *slog.Logger {
+	return c.logger
 }
 
 func defaultConfig() Config {
@@ -46,11 +52,12 @@ func defaultConfig() Config {
 
 		aliasedHandlerMethods: map[string]string{},
 
-		paramEncoders: map[reflect.Type]ParamEncoder{},
+		ParamEncoders: map[reflect.Type]ParamEncoder{},
 
 		httpClient: _defaultHTTPClient,
 
 		methodNamer: DefaultMethodNameFormatter,
+		logger:      slog.Default(),
 	}
 }
 
@@ -84,9 +91,21 @@ func WithNoReconnect() func(c *Config) {
 	}
 }
 
+func WithParamEncoderT[T any](encoder ParamEncoder) func(c *Config) {
+	return func(c *Config) {
+		c.ParamEncoders[reflect.TypeFor[T]()] = encoder
+	}
+}
+
 func WithParamEncoder(t interface{}, encoder ParamEncoder) func(c *Config) {
 	return func(c *Config) {
-		c.paramEncoders[reflect.TypeOf(t).Elem()] = encoder
+		c.ParamEncoders[reflect.TypeOf(t).Elem()] = encoder
+	}
+}
+
+func WithLogger(logger *slog.Logger) func(c *Config) {
+	return func(c *Config) {
+		c.logger = logger
 	}
 }
 

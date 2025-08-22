@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,19 +23,21 @@ import (
 
 	"github.com/deorth-kku/go-common"
 	"github.com/gorilla/websocket"
-	logging "github.com/ipfs/go-log/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/xerrors"
 )
 
-func init() {
-	if _, exists := os.LookupEnv("GOLOG_LOG_LEVEL"); !exists {
-		if err := logging.SetLogLevel("rpc", "DEBUG"); err != nil {
-			panic(err)
-		}
-	}
+func setlog(lv string) {
+	common.SetLog("", lv, common.DefaultFormat.String(), common.SlogAddSource{})
+}
 
+func init() {
+	lv, exists := os.LookupEnv("GOLOG_LOG_LEVEL")
+	if !exists {
+		lv = "DEBUG"
+	}
+	setlog(lv)
 	debugTrace = true
 }
 
@@ -679,7 +682,7 @@ func (h *ChanHandler) Sub(ctx context.Context, i int, eq int) (<-chan int, error
 
 	wait := h.wait
 
-	log.Warnf("SERVER SUB!")
+	slog.Warn("SERVER SUB!")
 	go func() {
 		defer close(out)
 		var n int
@@ -769,13 +772,13 @@ func TestChan(t *testing.T) {
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Warnf("last sub")
+	slog.Warn("last sub")
 	sub, err = client.Sub(ctx, 3, 6)
 	require.NoError(t, err)
 
-	log.Warnf("waiting for value now")
+	slog.Warn("waiting for value now")
 	require.Equal(t, 3, <-sub)
-	log.Warnf("not equal")
+	slog.Warn("not equal")
 
 	// close (remote)
 	serverHandler.wait <- struct{}{}
@@ -1021,9 +1024,9 @@ func TestChanClientReceiveAll(t *testing.T) {
 
 func TestControlChanDeadlock(t *testing.T) {
 	if _, exists := os.LookupEnv("GOLOG_LOG_LEVEL"); !exists {
-		_ = logging.SetLogLevel("rpc", "error")
+		setlog("ERROR")
 		defer func() {
-			_ = logging.SetLogLevel("rpc", "DEBUG")
+			setlog("DEBUG")
 		}()
 	}
 

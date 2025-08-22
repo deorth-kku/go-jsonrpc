@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
 	"time"
 
@@ -23,6 +24,7 @@ type ServerConfig struct {
 	reverseClientBuilder func(context.Context, *wsConn) (context.Context, error)
 	tracer               Tracer
 	methodNameFormatter  MethodNameFormatter
+	logger               *slog.Logger
 }
 
 type ServerOption func(c *ServerConfig)
@@ -34,12 +36,29 @@ func defaultServerConfig() ServerConfig {
 
 		pingInterval:        5 * time.Second,
 		methodNameFormatter: DefaultMethodNameFormatter,
+		logger:              slog.Default(),
+	}
+}
+
+func (c *ServerConfig) GetLogger() *slog.Logger {
+	return c.logger
+}
+
+func WithParamDecoderT[T any](decoder ParamDecoder) ServerOption {
+	return func(c *ServerConfig) {
+		c.paramDecoders[reflect.TypeFor[T]()] = decoder
 	}
 }
 
 func WithParamDecoder(t interface{}, decoder ParamDecoder) ServerOption {
 	return func(c *ServerConfig) {
 		c.paramDecoders[reflect.TypeOf(t).Elem()] = decoder
+	}
+}
+
+func WithServerLogger(logger *slog.Logger) ServerOption {
+	return func(c *ServerConfig) {
+		c.logger = logger
 	}
 }
 

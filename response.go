@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"log/slog"
 	"reflect"
 
 	"github.com/deorth-kku/go-common"
@@ -99,12 +100,12 @@ func (e *JSONRPCError) val(errors *Errors) reflect.Value {
 
 			if v.Type().Implements(errorCodecRT) {
 				if err := common.MustOk(reflect.TypeAssert[RPCErrorCodec](v)).FromJSONRPCError(*e); err != nil {
-					log.Errorf("Error converting JSONRPCError to custom error type '%s' (code %d): %w", t.String(), e.Code, err)
+					slog.Error("Error converting JSONRPCError to custom error", "type", t.String(), "code", e.Code, "err", err)
 					return reflect.ValueOf(e)
 				}
 			} else if len(e.Meta) > 0 && v.Type().Implements(marshalableRT) {
 				if err := common.MustOk(reflect.TypeAssert[marshalable](v)).UnmarshalJSON(e.Meta); err != nil {
-					log.Errorf("Error unmarshalling error metadata to custom error type '%s' (code %d): %w", t.String(), e.Code, err)
+					slog.Error("Error unmarshalling error metadata to custom error", "type", t.String(), "code", e.Code, "err", err)
 					return reflect.ValueOf(e)
 				}
 			}

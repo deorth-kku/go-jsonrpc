@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"io"
+	"log/slog"
 	"net/http"
 	"runtime/pprof"
 	"strings"
@@ -84,7 +85,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Errorw("upgrading connection", "error", err)
+		s.logger.Error("upgrading connection", "error", err)
 		// note that upgrader.Upgrade will set http error if there is an error
 		return
 	}
@@ -99,7 +100,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 	if s.reverseClientBuilder != nil {
 		ctx, err = s.reverseClientBuilder(ctx, wc)
 		if err != nil {
-			log.Errorf("failed to build reverse client: %s", err)
+			s.logger.Error("failed to build reverse client", "err", err)
 			w.WriteHeader(500)
 			return
 		}
@@ -111,7 +112,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 	})
 
 	if err := c.Close(); err != nil {
-		log.Errorw("closing websocket connection", "error", err)
+		s.logger.Error("closing websocket connection", "error", err)
 		return
 	}
 }
@@ -128,45 +129,51 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx = context.WithValue(ctx, connectionTypeCtxKey, ConnectionTypeHTTP)
-	s.handleReader(ctx, r.Body, w, rpcError)
+	s.handleReader(ctx, r.Body, w, rpcError(s.logger))
 }
 
 func (s *RPCServer) HandleRequest(ctx context.Context, r io.Reader, w io.Writer) {
-	s.handleReader(ctx, r, w, rpcError)
+	s.handleReader(ctx, r, w, rpcError(s.logger))
 }
 
-func rpcError(wf func(func(io.Writer)), req *request, code ErrorCode, err error) {
-	log.Errorf("RPC Error: %s", err)
-	wf(func(w io.Writer) {
-		if hw, ok := w.(http.ResponseWriter); ok {
-			if code == rpcInvalidRequest {
-				hw.WriteHeader(http.StatusBadRequest)
-			} else {
-				hw.WriteHeader(http.StatusInternalServerError)
+func (s *RPCServer) getlogger() *slog.Logger {
+	return s.logger
+}
+
+func rpcError(logger *slog.Logger) rpcErrFunc {
+	return func(wf func(func(io.Writer)), req *request, code ErrorCode, err error) {
+		logger.Error("RPC Error", "err", err)
+		wf(func(w io.Writer) {
+			if hw, ok := w.(http.ResponseWriter); ok {
+				if code == rpcInvalidRequest {
+					hw.WriteHeader(http.StatusBadRequest)
+				} else {
+					hw.WriteHeader(http.StatusInternalServerError)
+				}
 			}
-		}
 
-		log.Warnf("rpc error: %s", err)
+			logger.Warn("RPC Error", "err", err)
 
-		if req == nil {
-			req = &request{}
-		}
+			if req == nil {
+				req = &request{}
+			}
 
-		resp := response{
-			Jsonrpc: "2.0",
-			ID:      req.ID,
-			Error: &JSONRPCError{
-				Code:    code,
-				Message: err.Error(),
-			},
-		}
+			resp := response{
+				Jsonrpc: "2.0",
+				ID:      req.ID,
+				Error: &JSONRPCError{
+					Code:    code,
+					Message: err.Error(),
+				},
+			}
 
-		err = json.MarshalWrite(w, resp)
-		if err != nil {
-			log.Warnf("failed to write rpc error: %s", err)
-			return
-		}
-	})
+			err = json.MarshalWrite(w, resp)
+			if err != nil {
+				logger.Warn("failed to write rpc error", "err", err)
+				return
+			}
+		})
+	}
 }
 
 // Register registers new RPC handler
