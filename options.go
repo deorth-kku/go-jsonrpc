@@ -41,6 +41,10 @@ func (c *Config) GetLogger() *slog.Logger {
 	return c.logger
 }
 
+func (c *Config) GetHTTPClient() *http.Client {
+	return c.httpClient
+}
+
 func defaultConfig() Config {
 	return Config{
 		reconnectBackoff: backoff{

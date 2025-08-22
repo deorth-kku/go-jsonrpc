@@ -19,10 +19,12 @@ import (
 	"github.com/filecoin-project/go-jsonrpc"
 )
 
-// this use logger from [jsonrpc.Config], if you're using [jsonrpc.WithLogger] as well, make sure it's before this one.
+// this use [slog.Logger] and [http.Client] from [jsonrpc.Config].
+// if you're using [jsonrpc.WithLogger] or [jsonrpc.WithHTTPClient] as well, make sure they're before this one.
 func ReaderParamEncoder(addr string) jsonrpc.Option {
 	return func(c *jsonrpc.Config) {
 		logger := c.GetLogger()
+		client := c.GetHTTPClient()
 		jsonrpc.WithParamEncoderT[io.Reader](func(value reflect.Value) (reflect.Value, error) {
 			r := common.MustOk(reflect.TypeAssert[io.Reader](value))
 
@@ -32,7 +34,7 @@ func ReaderParamEncoder(addr string) jsonrpc.Option {
 
 			go func() {
 				// TODO: figure out errors here
-				resp, err := http.Post(u.String(), "application/octet-stream", r)
+				resp, err := client.Post(u.String(), "application/octet-stream", r)
 				if err != nil {
 					logger.Error("sending reader param", "err", err)
 					return
