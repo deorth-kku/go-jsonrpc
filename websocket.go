@@ -286,7 +286,7 @@ func (c *wsConn) handleOutChans() {
 			cases = cases[:n]
 			caseToID = caseToID[:n-internal]
 
-			rp := common.Must(v1.Marshal([]param{{v: reflect.ValueOf(id)}})) // this seems unnessary, just unmarshal a slice with id
+			rp := common.Must(v1.Marshal([]uint64{id}))
 
 			if err := c.sendRequest(request{
 				Jsonrpc: "2.0",
@@ -300,7 +300,7 @@ func (c *wsConn) handleOutChans() {
 		}
 
 		// forward message
-		rp, err := v1.Marshal([]param{{v: reflect.ValueOf(caseToID[chosen-internal])}, {v: val}})
+		rp, err := v1.Marshal([]any{caseToID[chosen-internal], val.Interface()})
 		if err != nil {
 			c.getlogger().Error("marshaling params for sendRequest failed", "err", err)
 			continue
@@ -352,7 +352,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req interface{}) error {
 func (c *wsConn) handleCtxAsync(actx context.Context, id interface{}) {
 	<-actx.Done()
 
-	rp, err := v1.Marshal([]param{{v: reflect.ValueOf(id)}})
+	rp, err := v1.Marshal([]any{id})
 	if err != nil {
 		c.getlogger().Error("marshaling params for sendRequest failed", "err", err)
 		return
@@ -373,21 +373,21 @@ func (c *wsConn) cancelCtx(req frame) {
 		c.getlogger().Warn(wsCancel + " call with ID set, won't respond")
 	}
 
-	var params []param
+	var params []any
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		c.getlogger().Error("failed to unmarshal channel", "method", wsCancel, "error", err.Error())
 		return
 	}
-
-	var id interface{}
-	if err := json.Unmarshal(params[0].data, &id); err != nil {
-		c.getlogger().Error("handle me", "err", err)
+	if len(params) == 0 {
+		c.getlogger().Error("no params for "+wsCancel, "reqID", req.ID)
 		return
 	}
 
-	cf, ok := c.handling.Load(id)
+	cf, ok := loadAssert[context.CancelFunc](c.handling.Load, params[0])
 	if ok {
-		cf.(context.CancelFunc)()
+		cf()
+	} else {
+		c.getlogger().Warn(wsCancel+" called with an invalid id", "reqID", req.ID, "params", params)
 	}
 }
 
@@ -398,19 +398,24 @@ func (c *wsConn) cancelCtx(req frame) {
 func (c *wsConn) handleChanMessage(frame frame) {
 	var params []param
 	if err := json.Unmarshal(frame.Params, &params); err != nil {
-		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "err", err)
+		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
+		return
+	}
+
+	if len(params) < 2 {
+		c.getlogger().Error("not enough params for xrpc.ch.val", "reqID", frame.ID, "params", params)
 		return
 	}
 
 	var chid uint64
 	if err := json.Unmarshal(params[0].data, &chid); err != nil {
-		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "err", err)
+		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
 
 	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.Load, chid)
 	if !ok {
-		c.getlogger().Error("xrpc.ch.val: handler not found", "chid", chid)
+		c.getlogger().Error("xrpc.ch.val: handler not found", "reqID", frame.ID, "chid", chid)
 		return
 	}
 
@@ -423,19 +428,22 @@ func (c *wsConn) handleChanMessage(frame frame) {
 func (c *wsConn) handleChanClose(frame frame) {
 	var params []param
 	if err := json.Unmarshal(frame.Params, &params); err != nil {
-		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "err", err)
+		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
+	}
+	if len(params) == 0 {
+		c.getlogger().Error("no params for xrpc.ch.val", "reqID", frame.ID)
 	}
 
 	var chid uint64
 	if err := json.Unmarshal(params[0].data, &chid); err != nil {
-		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "err", err)
+		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
 
 	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.LoadAndDelete, chid)
 	if !ok {
-		c.getlogger().Error("xrpc.ch.val: handler not found", "chid", chid)
+		c.getlogger().Error("xrpc.ch.val: handler not found", "reqID", frame.ID, "chid", chid)
 		return
 	}
 
@@ -448,7 +456,7 @@ func (c *wsConn) handleChanClose(frame frame) {
 func (c *wsConn) handleResponse(frame frame) {
 	req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
 	if !ok {
-		c.getlogger().Error("client got unknown ID in response", "id", frame.ID)
+		c.getlogger().Error("client got unknown ID in response", "reqID", frame.ID)
 		return
 	}
 	defer c.inflight.Delete(frame.ID)

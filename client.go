@@ -456,7 +456,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 			case <-ctxDone: // send cancel request
 				ctxDone = nil
 
-				rp, err := v1.Marshal([]param{{v: reflect.ValueOf(cr.req.ID)}})
+				rp, err := v1.Marshal([]any{cr.req.ID})
 				if err != nil {
 					return clientResponse{}, xerrors.Errorf("marshalling cancel request: %w", err)
 				}
