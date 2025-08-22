@@ -39,11 +39,18 @@ func NewErrors() Errors {
 	return Errors{
 		byType: map[reflect.Type]ErrorCode{},
 		byCode: map[ErrorCode]reflect.Type{
-			-1111111: reflect.TypeOf(&RPCConnectionError{}),
+			eTempWSError: reflect.TypeFor[RPCConnectionError](),
 		},
 	}
 }
 
+func RegisterError[T error](errs Errors, code ErrorCode) {
+	ty := reflect.TypeFor[T]()
+	errs.byCode[code] = ty
+	errs.byType[ty] = code
+}
+
+// Deprecated: Use [RegisterError] instead for type-safe operations
 func (e *Errors) Register(c ErrorCode, typ interface{}) {
 	rt := reflect.TypeOf(typ).Elem()
 	if !rt.Implements(errorType) {

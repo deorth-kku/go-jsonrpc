@@ -170,12 +170,12 @@ func (e *ComplexError) UnmarshalJSON(data []byte) error {
 func TestRespErrorVal(t *testing.T) {
 	// Initialize the Errors struct and register error types
 	errorsMap := NewErrors()
-	errorsMap.Register(1000, new(*StaticError))
-	errorsMap.Register(1001, new(*SimpleError))
-	errorsMap.Register(1002, new(*DataStringError))
-	errorsMap.Register(1003, new(*DataComplexError))
-	errorsMap.Register(1004, new(*MetaError))
-	errorsMap.Register(1005, new(*ComplexError))
+	RegisterError[*StaticError](errorsMap, 1000)
+	RegisterError[*SimpleError](errorsMap, 1001)
+	RegisterError[*DataStringError](errorsMap, 1002)
+	RegisterError[*DataComplexError](errorsMap, 1003)
+	RegisterError[*MetaError](errorsMap, 1004)
+	RegisterError[*ComplexError](errorsMap, 1005)
 
 	// Define test cases
 	testCases := []struct {
