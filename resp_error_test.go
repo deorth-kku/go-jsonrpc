@@ -81,14 +81,14 @@ func (e *DataComplexError) FromJSONRPCError(jerr JSONRPCError) error {
 		return fmt.Errorf("expected string data, got %T", jerr.Data)
 	}
 
-	if err := json.Unmarshal(data, &e.internalData); err != nil {
+	if err := json.Unmarshal(data, &e.internalData, v1opts); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (e *DataComplexError) ToJSONRPCError() (JSONRPCError, error) {
-	data, err := json.Marshal(e.internalData)
+	data, err := json.Marshal(e.internalData, v1opts)
 	if err != nil {
 		return JSONRPCError{}, err
 	}
@@ -113,7 +113,7 @@ func (e *MetaError) MarshalJSON() ([]byte, error) {
 	}{
 		Message: e.Message,
 		Details: e.Details,
-	})
+	}, v1opts)
 }
 
 func (e *MetaError) UnmarshalJSON(data []byte) error {
@@ -121,7 +121,7 @@ func (e *MetaError) UnmarshalJSON(data []byte) error {
 		Message string `json:"message"`
 		Details string `json:"details"`
 	}
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := json.Unmarshal(data, &temp, v1opts); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (e *ComplexError) MarshalJSON() ([]byte, error) {
 		Details: e.Details,
 		Message: e.Message,
 		Data:    e.Data,
-	})
+	}, v1opts)
 }
 
 func (e *ComplexError) UnmarshalJSON(data []byte) error {
@@ -158,7 +158,7 @@ func (e *ComplexError) UnmarshalJSON(data []byte) error {
 		Details string      `json:"details"`
 		Data    ComplexData `json:"data"`
 	}
-	if err := json.Unmarshal(data, &temp); err != nil {
+	if err := json.Unmarshal(data, &temp, v1opts); err != nil {
 		return err
 	}
 	e.Details = temp.Details

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -27,9 +26,9 @@ type RawParams jsontext.Value
 var rtRawParams = reflect.TypeFor[RawParams]()
 
 // todo is there a better way to tell 'struct with any number of fields'?
-func DecodeParams[T any](p RawParams) (T, error) {
+func DecodeParams[T any](p RawParams, opts ...json.Options) (T, error) {
 	var t T
-	err := json.Unmarshal(p, &t)
+	err := json.Unmarshal(p, &t, opts...)
 
 	// todo also handle list-encoding automagically (json.Unmarshal doesn't do that, does it?)
 
@@ -93,12 +92,17 @@ type handler struct {
 
 	methodNameFormatter MethodNameFormatter
 	logger              *slog.Logger
+	jsonOptions         json.Options
 
 	tracer Tracer
 }
 
-func (h *handler) getlogger() *slog.Logger {
+func (h *handler) GetLogger() *slog.Logger {
 	return h.logger
+}
+
+func (h *handler) GetJsonOptions() json.Options {
+	return h.jsonOptions
 }
 
 type Tracer func(method string, params []reflect.Value, results []reflect.Value, err error)
@@ -113,6 +117,7 @@ func makeHandler(sc ServerConfig) *handler {
 
 		methodNameFormatter: sc.methodNameFormatter,
 		logger:              sc.logger,
+		jsonOptions:         sc.jsonOptions,
 
 		maxRequestSize: sc.maxRequestSize,
 
@@ -214,7 +219,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	if bufferedRequest.Bytes()[0] == '[' && bufferedRequest.Bytes()[reqSize-1] == ']' {
 		var reqs []request
 
-		if err := json.UnmarshalRead(bufferedRequest, &reqs); err != nil {
+		if err := json.UnmarshalRead(bufferedRequest, &reqs, s.jsonOptions); err != nil {
 			rpcError(wf, nil, rpcParseError, xerrors.New("Parse error"))
 			return
 		}
@@ -235,7 +240,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 		_, _ = w.Write([]byte("]")) // todo consider handling this error
 	} else {
 		var req request
-		if err := json.UnmarshalRead(bufferedRequest, &req); err != nil {
+		if err := json.UnmarshalRead(bufferedRequest, &req, s.jsonOptions); err != nil {
 			rpcError(wf, &req, rpcParseError, xerrors.New("Parse error"))
 			return
 		}
@@ -373,7 +378,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 
 		var ps []param
 		if len(req.Params) > 0 {
-			err := json.Unmarshal(req.Params, &ps)
+			err := json.Unmarshal(req.Params, &ps, s.jsonOptions)
 			if err != nil {
 				rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling param array: %w", err))
 				stats.Record(ctx, metrics.RPCRequestError.M(1))
@@ -395,7 +400,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			dec, found := s.paramDecoders[typ]
 			if !found {
 				rp = reflect.New(typ)
-				if err := json.Unmarshal(ps[i].data, rp.Interface()); err != nil {
+				if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
 					rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 					stats.Record(ctx, metrics.RPCRequestError.M(1))
 					return
@@ -488,7 +493,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	}
 
 	withLazyWriter(w, func(w io.Writer) {
-		if err := json.MarshalWrite(w, resp, v1.DefaultOptionsV1()); err != nil {
+		if err := json.MarshalWrite(w, resp, s.jsonOptions); err != nil {
 			s.logger.Error("failed when writing resp", "err", err)
 			stats.Record(ctx, metrics.RPCResponseError.M(1))
 			return

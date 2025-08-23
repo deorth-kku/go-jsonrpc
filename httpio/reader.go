@@ -119,7 +119,7 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 		logger = c.GetLogger()
 		jsonrpc.WithParamDecoderT[io.Reader](func(ctx context.Context, b []byte) (reflect.Value, error) {
 			var strId string
-			if err := json.Unmarshal(b, &strId); err != nil {
+			if err := json.Unmarshal(b, &strId, c.GetJsonOptions()); err != nil {
 				return reflect.Value{}, xerrors.Errorf("unmarshaling reader id: %w", err)
 			}
 

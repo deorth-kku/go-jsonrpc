@@ -129,18 +129,18 @@ func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx = context.WithValue(ctx, connectionTypeCtxKey, ConnectionTypeHTTP)
-	s.handleReader(ctx, r.Body, w, rpcError(s.logger))
+	s.handleReader(ctx, r.Body, w, rpcError(s.logger, s.jsonOptions))
 }
 
 func (s *RPCServer) HandleRequest(ctx context.Context, r io.Reader, w io.Writer) {
-	s.handleReader(ctx, r, w, rpcError(s.logger))
+	s.handleReader(ctx, r, w, rpcError(s.logger, s.jsonOptions))
 }
 
-func (s *RPCServer) getlogger() *slog.Logger {
+func (s *RPCServer) GetLogger() *slog.Logger {
 	return s.logger
 }
 
-func rpcError(logger *slog.Logger) rpcErrFunc {
+func rpcError(logger *slog.Logger, jopts json.Options) rpcErrFunc {
 	return func(wf func(func(io.Writer)), req *request, code ErrorCode, err error) {
 		logger.Error("RPC Error", "err", err)
 		wf(func(w io.Writer) {
@@ -167,7 +167,7 @@ func rpcError(logger *slog.Logger) rpcErrFunc {
 				},
 			}
 
-			err = json.MarshalWrite(w, resp)
+			err = json.MarshalWrite(w, resp, jopts)
 			if err != nil {
 				logger.Warn("failed to write rpc error", "err", err)
 				return

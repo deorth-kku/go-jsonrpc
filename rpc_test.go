@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -40,6 +41,8 @@ func init() {
 	setlog(lv)
 	debugTrace = true
 }
+
+var v1opts = v1.DefaultOptionsV1()
 
 type SimpleServerHandler struct {
 	n int32
@@ -331,7 +334,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -442,7 +445,7 @@ func TestRPCHttpClient(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -668,7 +671,7 @@ func TestUnmarshalableResult(t *testing.T) {
 	defer closer()
 
 	_, err = client.GetUnUnmarshalableStuff()
-	require.EqualError(t, err, "RPC client error: unmarshaling frame: json: cannot unmarshal JSON number into Go jsonrpc.UnUnmarshalable within \"/result\": nope")
+	require.EqualError(t, err, "RPC client error: unmarshaling frame: nope")
 }
 
 type ChanHandler struct {
@@ -1141,7 +1144,7 @@ func readerEnc(rin reflect.Value) (reflect.Value, error) {
 
 func readerDec(ctx context.Context, rin []byte) (reflect.Value, error) {
 	var id int
-	if err := json.Unmarshal(rin, &id); err != nil {
+	if err := json.Unmarshal(rin, &id, v1opts); err != nil {
 		return reflect.Value{}, err
 	}
 
@@ -1261,7 +1264,7 @@ func TestIDHandling(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%v", tc.expect), func(t *testing.T) {
 			var decoded request
-			err := json.UnmarshalRead(strings.NewReader(tc.str), &decoded)
+			err := json.UnmarshalRead(strings.NewReader(tc.str), &decoded, v1opts)
 			if tc.expectErr {
 				require.Error(t, err)
 			} else {

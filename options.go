@@ -1,9 +1,14 @@
 package jsonrpc
 
 import (
+	"context"
+	v1 "encoding/json"
+	"encoding/json/v2"
+	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -35,10 +40,30 @@ type Config struct {
 
 	methodNamer MethodNameFormatter
 	logger      *slog.Logger
+	jsonOptions json.Options
+}
+
+func (c Config) getclient(namespace string) client {
+	return client{
+		namespace:           namespace,
+		paramEncoders:       c.ParamEncoders,
+		errors:              c.errors,
+		methodNameFormatter: c.methodNamer,
+		logger:              c.logger,
+		jsonOption:          c.jsonOptions,
+	}
+}
+
+func (c *Config) handle(context.Context, request, func(func(io.Writer)), rpcErrFunc, func(keepCtx bool), chanOut) {
+	c.logger.Error("handleCall on client with no reverse handler")
 }
 
 func (c *Config) GetLogger() *slog.Logger {
 	return c.logger
+}
+
+func (c *Config) GetJsonOptions() json.Options {
+	return c.jsonOptions
 }
 
 func (c *Config) GetHTTPClient() *http.Client {
@@ -62,6 +87,7 @@ func defaultConfig() Config {
 
 		methodNamer: DefaultMethodNameFormatter,
 		logger:      slog.Default(),
+		jsonOptions: v1.DefaultOptionsV1(),
 	}
 }
 
@@ -110,6 +136,21 @@ func WithParamEncoder(t interface{}, encoder ParamEncoder) func(c *Config) {
 func WithLogger(logger *slog.Logger) func(c *Config) {
 	return func(c *Config) {
 		c.logger = logger
+	}
+}
+
+func updateJsonOptions(opt *json.Options, new []json.Options) {
+	if new == nil {
+		*opt = nil
+	} else {
+		new = slices.Insert(new, 0, *opt)
+		*opt = json.JoinOptions(new...)
+	}
+}
+
+func WithJsonOptions(opts ...json.Options) func(c *Config) {
+	return func(c *Config) {
+		updateJsonOptions(&c.jsonOptions, opts)
 	}
 }
 

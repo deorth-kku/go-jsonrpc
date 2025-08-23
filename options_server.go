@@ -2,6 +2,8 @@ package jsonrpc
 
 import (
 	"context"
+	v1 "encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"reflect"
 	"time"
@@ -25,6 +27,7 @@ type ServerConfig struct {
 	tracer               Tracer
 	methodNameFormatter  MethodNameFormatter
 	logger               *slog.Logger
+	jsonOptions          json.Options
 }
 
 type ServerOption func(c *ServerConfig)
@@ -37,11 +40,16 @@ func defaultServerConfig() ServerConfig {
 		pingInterval:        5 * time.Second,
 		methodNameFormatter: DefaultMethodNameFormatter,
 		logger:              slog.Default(),
+		jsonOptions:         v1.DefaultOptionsV1(),
 	}
 }
 
 func (c *ServerConfig) GetLogger() *slog.Logger {
 	return c.logger
+}
+
+func (c *ServerConfig) GetJsonOptions() json.Options {
+	return c.jsonOptions
 }
 
 func WithParamDecoderT[T any](decoder ParamDecoder) ServerOption {
@@ -59,6 +67,12 @@ func WithParamDecoder(t interface{}, decoder ParamDecoder) ServerOption {
 func WithServerLogger(logger *slog.Logger) ServerOption {
 	return func(c *ServerConfig) {
 		c.logger = logger
+	}
+}
+
+func WithServerJsonOptions(opts ...json.Options) ServerOption {
+	return func(c *ServerConfig) {
+		updateJsonOptions(&c.jsonOptions, opts)
 	}
 }
 

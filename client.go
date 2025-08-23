@@ -5,7 +5,6 @@ import (
 	"container/list"
 	"context"
 	"encoding/base64"
-	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -100,7 +99,7 @@ func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 			return err
 		}
 		data = slices.Clone(data)
-		rv.value = reflect.ValueOf(deferredData(data))
+		rv.value = reflect.ValueOf(deferredData{data, dec.Options()})
 		return nil
 	}
 	temprv := reflect.New(ty)
@@ -108,7 +107,10 @@ func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	return json.UnmarshalDecode(dec, temprv.Interface())
 }
 
-type deferredData jsontext.Value
+type deferredData struct {
+	data jsontext.Value
+	opt  json.Options
+}
 
 // run the deffered unmarshal. if the data was already unmarshaled, it does nothing and return nil.
 func (rv *resultValue) deferredUnmarshal(ty reflect.Type) error {
@@ -121,7 +123,7 @@ func (rv *resultValue) deferredUnmarshal(ty reflect.Type) error {
 	}
 	temprv := reflect.New(ty)
 	rv.value = temprv.Elem()
-	return v1.Unmarshal(data, temprv.Interface())
+	return json.Unmarshal(data.data, temprv.Interface(), data.opt)
 }
 
 func (rv resultValue) MarshalJSONTo(enc *jsontext.Encoder) error {
@@ -180,6 +182,7 @@ type client struct {
 
 	methodNameFormatter MethodNameFormatter
 	logger              *slog.Logger
+	jsonOption          json.Options
 }
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
@@ -213,19 +216,13 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 		o(&config)
 	}
 
-	c := client{
-		namespace:           namespace,
-		paramEncoders:       config.ParamEncoders,
-		errors:              config.errors,
-		methodNameFormatter: config.methodNamer,
-		logger:              config.logger,
-	}
+	c := config.getclient(namespace)
 
 	stop := make(chan struct{})
 	c.exiting = stop
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := v1.Marshal(&cr.req)
+		b, err := json.Marshal(&cr.req, c.jsonOption)
 		if err != nil {
 			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
 		}
@@ -244,7 +241,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.UnmarshalRead(rawResp, &resp); err != nil {
+			if err := json.UnmarshalRead(rawResp, &resp, c.jsonOption); err != nil {
 				return clientResponse{}, xerrors.Errorf("unmarshaling response: %w", err)
 			}
 
@@ -266,13 +263,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 }
 
 func httpClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
-	c := client{
-		namespace:           namespace,
-		paramEncoders:       config.ParamEncoders,
-		errors:              config.errors,
-		methodNameFormatter: config.methodNamer,
-		logger:              config.logger,
-	}
+	c := config.getclient(namespace)
 
 	stop := make(chan struct{})
 	c.exiting = stop
@@ -282,7 +273,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	}
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := v1.Marshal(&cr.req)
+		b, err := json.Marshal(&cr.req, c.jsonOption)
 		if err != nil {
 			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
 		}
@@ -316,7 +307,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.UnmarshalRead(httpResp.Body, &resp); err != nil {
+			if err := json.UnmarshalRead(httpResp.Body, &resp, c.jsonOption); err != nil {
 				return clientResponse{}, xerrors.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
 			}
 
@@ -335,18 +326,6 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	return func() {
 		close(stop)
 	}, nil
-}
-
-type fakehandler struct {
-	l *slog.Logger
-}
-
-func (f fakehandler) getlogger() *slog.Logger {
-	return f.l
-}
-
-func (fakehandler) handle(context.Context, request, func(func(io.Writer)), rpcErrFunc, func(keepCtx bool), chanOut) {
-	panic("this shouldn't be called")
 }
 
 func websocketClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
@@ -375,13 +354,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		connFactory = nil
 	}
 
-	c := client{
-		namespace:           namespace,
-		paramEncoders:       config.ParamEncoders,
-		errors:              config.errors,
-		methodNameFormatter: config.methodNamer,
-		logger:              config.logger,
-	}
+	c := config.getclient(namespace)
 
 	requests := c.setupRequestChan()
 
@@ -398,7 +371,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		}
 		hnd = h
 	} else {
-		hnd = fakehandler{config.logger}
+		hnd = &config
 	}
 
 	wconn := &wsConn{
@@ -456,7 +429,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 			case <-ctxDone: // send cancel request
 				ctxDone = nil
 
-				rp, err := v1.Marshal([]any{cr.req.ID})
+				rp, err := json.Marshal([]any{cr.req.ID}, c.jsonOption)
 				if err != nil {
 					return clientResponse{}, xerrors.Errorf("marshalling cancel request: %w", err)
 				}
@@ -586,7 +559,7 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 			}
 
 			val := reflect.New(ftyp.Out(valOut).Elem())
-			if err := json.Unmarshal(result, val.Interface()); err != nil {
+			if err := json.Unmarshal(result, val.Interface(), c.jsonOption); err != nil {
 				c.logger.Error("error unmarshaling chan response", "err", err)
 				return
 			}
@@ -706,7 +679,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 			}
 		}
 		var err error
-		serializedParams, err = v1.Marshal(params)
+		serializedParams, err = json.Marshal(params, fn.client.jsonOption)
 		if err != nil {
 			return fn.processError(fmt.Errorf("marshaling params failed: %w", err))
 		}
