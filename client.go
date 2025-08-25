@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -23,8 +22,6 @@ import (
 	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"go.opencensus.io/trace"
-	"go.opencensus.io/trace/propagation"
 	"golang.org/x/xerrors"
 )
 
@@ -685,12 +682,9 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		}
 	}
 
-	var ctx context.Context
-	var span *trace.Span
+	ctx := context.Background()
 	if fn.hasCtx == 1 {
 		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
-		ctx, span = trace.StartSpan(ctx, "api.call")
-		defer span.End()
 	}
 
 	retVal := func() reflect.Value { return reflect.Value{} }
@@ -707,16 +701,6 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		ID:      id,
 		Method:  fn.name,
 		Params:  serializedParams,
-	}
-
-	if span != nil {
-		span.AddAttributes(trace.StringAttribute("method", req.Method))
-
-		eSC := base64.StdEncoding.EncodeToString(
-			propagation.Binary(span.SpanContext()))
-		req.Meta = map[string]string{
-			"SpanContext": eSC,
-		}
 	}
 
 	b := backoff{

@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -12,13 +11,7 @@ import (
 	"reflect"
 	"runtime"
 
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
-	"go.opencensus.io/trace"
-	"go.opencensus.io/trace/propagation"
 	"golang.org/x/xerrors"
-
-	"github.com/filecoin-project/go-jsonrpc/metrics"
 )
 
 type RawParams jsontext.Value
@@ -105,7 +98,43 @@ func (h *handler) GetJsonOptions() json.Options {
 	return h.jsonOptions
 }
 
-type Tracer func(method string, params []reflect.Value, results []reflect.Value, err error)
+type (
+	TracerBytesFunc   = func(data []byte, err error)
+	TracerRequestFunc = func(jsonrpc string, id any, method string, params jsontext.Value, meta map[string]string, err error)
+	TracerParamsFunc  = func(method string, params []reflect.Value, results []reflect.Value, err error)
+)
+
+type Tracer struct {
+	OnParseError     TracerBytesFunc
+	OnInvalidRequest TracerBytesFunc
+	OnInvalidMethod  TracerRequestFunc
+	OnInvalidParams  TracerRequestFunc
+	OnRequestError   TracerParamsFunc
+	OnResponseError  TracerParamsFunc
+	OnNotification   TracerParamsFunc
+	OnSuccess        TracerParamsFunc
+}
+
+func safecall2[Q, E any](f func(Q, E), arg0 Q, arg1 E) {
+	if f == nil {
+		return
+	}
+	f(arg0, arg1)
+}
+
+func safecall4[Q, W, E, R any](f func(Q, W, E, R), arg0 Q, arg1 W, arg2 E, arg3 R) {
+	if f == nil {
+		return
+	}
+	f(arg0, arg1, arg2, arg3)
+}
+
+func safecall6[Q, W, E, R, T, Y any](f func(Q, W, E, R, T, Y), arg0 Q, arg1 W, arg2 E, arg3 R, arg4 T, arg5 Y) {
+	if f == nil {
+		return
+	}
+	f(arg0, arg1, arg2, arg3, arg4, arg5)
+}
 
 func makeHandler(sc ServerConfig) *handler {
 	return &handler{
@@ -194,16 +223,18 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	if err != nil {
 		// ReadFrom will discard EOF so any error here is unexpected and should
 		// be reported.
-		rpcError(wf, nil, rpcParseError, xerrors.Errorf("reading request: %w", err))
+		err = xerrors.Errorf("reading request: %w", err)
+		rpcError(wf, nil, rpcParseError, err)
+		safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 		return
 	}
 	if reqSize > s.maxRequestSize {
-		rpcError(wf, nil, rpcParseError,
-			// rpcParseError is the closest we have from the standard errors defined
-			// in [jsonrpc spec](https://www.jsonrpc.org/specification#error_object)
-			// to report the maximum limit.
-			xerrors.Errorf("request bigger than maximum %d allowed",
-				s.maxRequestSize))
+		err = xerrors.Errorf("request bigger than maximum %d allowed", s.maxRequestSize)
+		rpcError(wf, nil, rpcParseError, err)
+		// rpcParseError is the closest we have from the standard errors defined
+		// in [jsonrpc spec](https://www.jsonrpc.org/specification#error_object)
+		// to report the maximum limit.
+		safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 		return
 	}
 
@@ -212,7 +243,9 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	reqSize = int64(bufferedRequest.Len())
 
 	if reqSize == 0 {
-		rpcError(wf, nil, rpcInvalidRequest, xerrors.New("Invalid request"))
+		err = xerrors.New("Invalid request")
+		rpcError(wf, nil, rpcInvalidRequest, err)
+		safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
 		return
 	}
 
@@ -221,11 +254,14 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 
 		if err := json.UnmarshalRead(bufferedRequest, &reqs, s.jsonOptions); err != nil {
 			rpcError(wf, nil, rpcParseError, xerrors.New("Parse error"))
+			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 			return
 		}
 
 		if len(reqs) == 0 {
-			rpcError(wf, nil, rpcInvalidRequest, xerrors.New("Invalid request"))
+			err = xerrors.New("Invalid request")
+			rpcError(wf, nil, rpcInvalidRequest, err)
+			safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
 			return
 		}
 
@@ -242,6 +278,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 		var req request
 		if err := json.UnmarshalRead(bufferedRequest, &req, s.jsonOptions); err != nil {
 			rpcError(wf, &req, rpcParseError, xerrors.New("Parse error"))
+			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 			return
 		}
 		s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
@@ -270,33 +307,6 @@ func (s *handler) doCall(methodName string, f reflect.Value, params []reflect.Va
 
 	out = f.Call(params)
 	return
-}
-
-func (s *handler) getSpan(ctx context.Context, req request) (context.Context, *trace.Span) {
-	if req.Meta == nil {
-		return ctx, nil
-	}
-
-	var span *trace.Span
-	if eSC, ok := req.Meta["SpanContext"]; ok {
-		bSC := make([]byte, base64.StdEncoding.DecodedLen(len(eSC)))
-		_, err := base64.StdEncoding.Decode(bSC, []byte(eSC))
-		if err != nil {
-			s.logger.Error("SpanContext: decode", "error", err)
-			return ctx, nil
-		}
-		sc, ok := propagation.FromBinary(bSC)
-		if !ok {
-			s.logger.Error("SpanContext: could not create span", "data", bSC)
-			return ctx, nil
-		}
-		ctx, span = trace.StartSpanWithRemoteParent(ctx, "api.handle", sc)
-	} else {
-		ctx, span = trace.StartSpan(ctx, "api.handle")
-	}
-
-	span.AddAttributes(trace.StringAttribute("method", req.Method))
-	return ctx, span
 }
 
 func (s *handler) createError(err error) *JSONRPCError {
@@ -335,10 +345,6 @@ func (s *handler) createError(err error) *JSONRPCError {
 
 func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut) {
 	// Not sure if we need to sanitize the incoming req.Method or not.
-	ctx, span := s.getSpan(ctx, req)
-	ctx, _ = tag.New(ctx, tag.Insert(metrics.RPCMethod, req.Method))
-	defer span.End()
-
 	handler, ok := s.methods[req.Method]
 	if !ok {
 		aliasTo, ok := s.aliasedMethods[req.Method]
@@ -346,8 +352,9 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			handler, ok = s.methods[aliasTo]
 		}
 		if !ok {
-			rpcError(w, &req, rpcMethodNotFound, fmt.Errorf("method '%s' not found", req.Method))
-			stats.Record(ctx, metrics.RPCInvalidMethod.M(1))
+			err := fmt.Errorf("method '%s' not found", req.Method)
+			rpcError(w, &req, rpcMethodNotFound, err)
+			safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 			done(false)
 			return
 		}
@@ -357,8 +364,9 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	defer done(outCh)
 
 	if chOut == nil && outCh {
-		rpcError(w, &req, rpcMethodNotFound, fmt.Errorf("method '%s' not supported in this mode (no out channel support)", req.Method))
-		stats.Record(ctx, metrics.RPCRequestError.M(1))
+		err := fmt.Errorf("method '%s' not supported in this mode (no out channel support)", req.Method)
+		rpcError(w, &req, rpcMethodNotFound, err)
+		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 		return
 	}
 
@@ -381,14 +389,15 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			err := json.Unmarshal(req.Params, &ps, s.jsonOptions)
 			if err != nil {
 				rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling param array: %w", err))
-				stats.Record(ctx, metrics.RPCRequestError.M(1))
+				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 				return
 			}
 		}
 
 		if len(ps) != handler.nParams {
-			rpcError(w, &req, rpcInvalidParams, fmt.Errorf("wrong param count (method '%s'): %d != %d", req.Method, len(ps), handler.nParams))
-			stats.Record(ctx, metrics.RPCRequestError.M(1))
+			err := fmt.Errorf("wrong param count (method '%s'): %d != %d", req.Method, len(ps), handler.nParams)
+			rpcError(w, &req, rpcInvalidParams, err)
+			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 			done(false)
 			return
 		}
@@ -402,7 +411,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 				rp = reflect.New(typ)
 				if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
 					rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
-					stats.Record(ctx, metrics.RPCRequestError.M(1))
+					safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 					return
 				}
 				rp = rp.Elem()
@@ -411,7 +420,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 				rp, err = dec(ctx, ps[i].data)
 				if err != nil {
 					rpcError(w, &req, rpcParseError, xerrors.Errorf("decoding params for '%s' (param: %d; custom decoder): %w", req.Method, i, err))
-					stats.Record(ctx, metrics.RPCRequestError.M(1))
+					safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 					return
 				}
 			}
@@ -425,19 +434,15 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	callResult, err := s.doCall(req.Method, handler.handlerFunc, callParams)
 	if err != nil {
 		rpcError(w, &req, 0, xerrors.Errorf("fatal error calling '%s': %w", req.Method, err))
-		stats.Record(ctx, metrics.RPCRequestError.M(1))
-		if s.tracer != nil {
-			s.tracer(req.Method, callParams, nil, err)
-		}
+		safecall4(s.tracer.OnRequestError, req.Method, callParams, callResult, err)
 		return
 	}
 	if req.ID == nil {
+		safecall4(s.tracer.OnNotification, req.Method, callParams, callResult, err)
 		return // notification
 	}
 
-	if s.tracer != nil {
-		s.tracer(req.Method, callParams, callResult, nil)
-	}
+	safecall4(s.tracer.OnSuccess, req.Method, callParams, callResult, err)
 	// /////////////////
 
 	resp := response{
@@ -446,12 +451,11 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	}
 
 	if handler.errOut != -1 {
-		err := callResult[handler.errOut].Interface()
-		if err != nil {
+		err, ok := reflect.TypeAssert[error](callResult[handler.errOut])
+		if ok {
 			s.logger.Warn("error in RPC call", "method", req.Method, "err", err)
-			stats.Record(ctx, metrics.RPCResponseError.M(1))
-
-			resp.Error = s.createError(err.(error))
+			safecall4(s.tracer.OnRequestError, req.Method, callParams, callResult, err)
+			resp.Error = s.createError(err)
 		}
 	}
 
@@ -478,7 +482,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			}
 
 			s.logger.Warn("failed to setup channel in RPC call", "method", req.Method, "err", err)
-			stats.Record(ctx, metrics.RPCResponseError.M(1))
+			safecall4(s.tracer.OnRequestError, req.Method, callParams, callResult, err)
 
 			resp.Error = &JSONRPCError{
 				Code:    1,
@@ -495,7 +499,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	withLazyWriter(w, func(w io.Writer) {
 		if err := json.MarshalWrite(w, resp, s.jsonOptions); err != nil {
 			s.logger.Error("failed when writing resp", "err", err)
-			stats.Record(ctx, metrics.RPCResponseError.M(1))
+			safecall4(s.tracer.OnResponseError, req.Method, callParams, callResult, err)
 			return
 		}
 	})
