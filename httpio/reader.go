@@ -12,7 +12,6 @@ import (
 
 	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
-	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-jsonrpc"
 )
@@ -121,7 +120,7 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 		jsonrpc.WithParamUnmarshaler(func(dec *jsontext.Decoder, rd *io.Reader) error {
 			var u uuid.UUID
 			if err := json.UnmarshalDecode(dec, &u); err != nil {
-				return xerrors.Errorf("unmarshaling reader id: %w", err)
+				return fmt.Errorf("unmarshaling reader id: %w", err)
 			}
 			defer readers.Delete(u)
 

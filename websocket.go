@@ -17,7 +17,6 @@ import (
 
 	"github.com/deorth-kku/go-common"
 	"github.com/gorilla/websocket"
-	"golang.org/x/xerrors"
 )
 
 const wsCancel = "xrpc.cancel"
@@ -338,7 +337,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req interface{}) error {
 	}:
 		return nil
 	case <-c.exiting:
-		return xerrors.New("connection closing")
+		return errors.New("connection closing")
 	}
 }
 
@@ -693,7 +692,7 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 				Code:    eTempWSError,
 				Message: fmt.Sprintf("RPC client error: unmarshaling frame: %s", err)}
 		} else {
-			c.readError <- xerrors.Errorf("reading frame into a buffer: %w", err)
+			c.readError <- fmt.Errorf("reading frame into a buffer: %w", err)
 			return
 		}
 	}
@@ -933,6 +932,6 @@ func normalizeID(id interface{}) (interface{}, error) {
 	case int64: // clients sending int64 need to normalize to float64
 		return float64(v), nil
 	default:
-		return nil, xerrors.Errorf("invalid id type: %T", id)
+		return nil, fmt.Errorf("invalid id type: %T", id)
 	}
 }

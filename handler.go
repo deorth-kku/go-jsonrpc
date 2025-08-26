@@ -5,13 +5,12 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"reflect"
 	"runtime"
-
-	"golang.org/x/xerrors"
 )
 
 type RawParams jsontext.Value
@@ -220,13 +219,13 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	if err != nil {
 		// ReadFrom will discard EOF so any error here is unexpected and should
 		// be reported.
-		err = xerrors.Errorf("reading request: %w", err)
+		err = fmt.Errorf("reading request: %w", err)
 		rpcError(wf, nil, rpcParseError, err)
 		safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 		return
 	}
 	if reqSize > s.maxRequestSize {
-		err = xerrors.Errorf("request bigger than maximum %d allowed", s.maxRequestSize)
+		err = fmt.Errorf("request bigger than maximum %d allowed", s.maxRequestSize)
 		rpcError(wf, nil, rpcParseError, err)
 		// rpcParseError is the closest we have from the standard errors defined
 		// in [jsonrpc spec](https://www.jsonrpc.org/specification#error_object)
@@ -240,7 +239,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	reqSize = int64(bufferedRequest.Len())
 
 	if reqSize == 0 {
-		err = xerrors.New("Invalid request")
+		err = errors.New("invalid request")
 		rpcError(wf, nil, rpcInvalidRequest, err)
 		safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
 		return
@@ -250,13 +249,13 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 		var reqs []request
 
 		if err := json.UnmarshalRead(bufferedRequest, &reqs, s.jsonOptions); err != nil {
-			rpcError(wf, nil, rpcParseError, xerrors.New("Parse error"))
+			rpcError(wf, nil, rpcParseError, errors.New("parse error"))
 			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 			return
 		}
 
 		if len(reqs) == 0 {
-			err = xerrors.New("Invalid request")
+			err = errors.New("invalid request")
 			rpcError(wf, nil, rpcInvalidRequest, err)
 			safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
 			return
@@ -274,7 +273,7 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	} else {
 		var req request
 		if err := json.UnmarshalRead(bufferedRequest, &req, s.jsonOptions); err != nil {
-			rpcError(wf, &req, rpcParseError, xerrors.New("Parse error"))
+			rpcError(wf, &req, rpcParseError, errors.New("parse error"))
 			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
 			return
 		}
@@ -297,7 +296,7 @@ var _ slog.LogValuer = stackstring{}
 func (s *handler) doCall(methodName string, f reflect.Value, params []reflect.Value) (out []reflect.Value, err error) {
 	defer func() {
 		if i := recover(); i != nil {
-			err = xerrors.Errorf("panic in rpc method '%s': %s", methodName, i)
+			err = fmt.Errorf("panic in rpc method '%s': %s", methodName, i)
 			s.logger.Error("panic in rpc method", "method_name", methodName, "stack", stackstring{}, "err", err)
 		}
 	}()
@@ -385,7 +384,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 		if len(req.Params) > 0 {
 			err := json.Unmarshal(req.Params, &ps, s.jsonOptions)
 			if err != nil {
-				rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling param array: %w", err))
+				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling param array: %w", err))
 				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 				return
 			}
@@ -405,7 +404,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			typ := handler.paramReceivers[i]
 			rp = reflect.New(typ)
 			if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
-				rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
+				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 				return
 			}
@@ -417,7 +416,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 
 	callResult, err := s.doCall(req.Method, handler.handlerFunc, callParams)
 	if err != nil {
-		rpcError(w, &req, 0, xerrors.Errorf("fatal error calling '%s': %w", req.Method, err))
+		rpcError(w, &req, 0, fmt.Errorf("fatal error calling '%s': %w", req.Method, err))
 		safecall4(s.tracer.OnRequestError, req.Method, callParams, callResult, err)
 		return
 	}

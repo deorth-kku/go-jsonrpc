@@ -22,7 +22,6 @@ import (
 	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"golang.org/x/xerrors"
 )
 
 const (
@@ -191,7 +190,7 @@ func NewMergeClient(ctx context.Context, addr string, namespace string, outs []i
 
 	u, err := url.Parse(addr)
 	if err != nil {
-		return nil, xerrors.Errorf("parsing address: %w", err)
+		return nil, fmt.Errorf("parsing address: %w", err)
 	}
 
 	switch u.Scheme {
@@ -200,7 +199,7 @@ func NewMergeClient(ctx context.Context, addr string, namespace string, outs []i
 	case "http", "https":
 		return httpClient(ctx, addr, namespace, outs, requestHeader, config)
 	default:
-		return nil, xerrors.Errorf("unknown url scheme '%s'", u.Scheme)
+		return nil, fmt.Errorf("unknown url scheme '%s'", u.Scheme)
 	}
 
 }
@@ -220,7 +219,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		b, err := json.Marshal(&cr.req, c.jsonOption)
 		if err != nil {
-			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
+			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
 		}
 
 		if ctx == nil {
@@ -229,7 +228,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 
 		rawResp, err := doRequest(ctx, b)
 		if err != nil {
-			return clientResponse{}, xerrors.Errorf("doRequest failed: %w", err)
+			return clientResponse{}, fmt.Errorf("doRequest failed: %w", err)
 		}
 
 		defer rawResp.Close()
@@ -238,11 +237,11 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
 			if err := json.UnmarshalRead(rawResp, &resp, c.jsonOption); err != nil {
-				return clientResponse{}, xerrors.Errorf("unmarshaling response: %w", err)
+				return clientResponse{}, fmt.Errorf("unmarshaling response: %w", err)
 			}
 
 			if resp.ID != cr.req.ID {
-				return clientResponse{}, xerrors.New("request and response id didn't match")
+				return clientResponse{}, errors.New("request and response id didn't match")
 			}
 		}
 
@@ -271,7 +270,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		b, err := json.Marshal(&cr.req, c.jsonOption)
 		if err != nil {
-			return clientResponse{}, xerrors.Errorf("marshalling request: %w", err)
+			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
 		}
 
 		hreq, err := http.NewRequest("POST", addr, bytes.NewReader(b))
@@ -295,7 +294,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 		// likely a failure outside of our control and ability to inspect; jsonrpc server only ever
 		// returns json format errors with either a StatusBadRequest or a StatusInternalServerError
 		if httpResp.StatusCode > http.StatusBadRequest && httpResp.StatusCode != http.StatusInternalServerError {
-			return clientResponse{}, xerrors.Errorf("request failed, http status %s", httpResp.Status)
+			return clientResponse{}, fmt.Errorf("request failed, http status %s", httpResp.Status)
 		}
 
 		defer httpResp.Body.Close()
@@ -304,11 +303,11 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
 			if err := json.UnmarshalRead(httpResp.Body, &resp, c.jsonOption); err != nil {
-				return clientResponse{}, xerrors.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
+				return clientResponse{}, fmt.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
 			}
 
 			if resp.ID != cr.req.ID {
-				return clientResponse{}, xerrors.New("request and response id didn't match")
+				return clientResponse{}, errors.New("request and response id didn't match")
 			}
 		}
 
@@ -331,7 +330,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	connFactory := func() (*websocket.Conn, error) {
 		conn, _, err := config.wsDialer.Dial(addr, requestHeader)
 		if err != nil {
-			return nil, &RPCConnectionError{xerrors.Errorf("cannot dial address %s for %w", addr, err)}
+			return nil, &RPCConnectionError{fmt.Errorf("cannot dial address %s for %w", addr, err)}
 		}
 		return conn, nil
 	}
@@ -427,7 +426,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 
 				rp, err := json.Marshal([]any{cr.req.ID}, c.jsonOption)
 				if err != nil {
-					return clientResponse{}, xerrors.Errorf("marshalling cancel request: %w", err)
+					return clientResponse{}, fmt.Errorf("marshalling cancel request: %w", err)
 				}
 
 				cancelReq := clientRequest{
@@ -457,11 +456,11 @@ func (c *client) provide(outs []interface{}) error {
 	for _, handler := range outs {
 		htyp := reflect.TypeOf(handler)
 		if htyp.Kind() != reflect.Ptr {
-			return xerrors.New("expected handler to be a pointer")
+			return errors.New("expected handler to be a pointer")
 		}
 		typ := htyp.Elem()
 		if typ.Kind() != reflect.Struct {
-			return xerrors.New("handler should be a struct")
+			return errors.New("handler should be a struct")
 		}
 
 		val := reflect.ValueOf(handler)
@@ -717,7 +716,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		}
 
 		if !fn.notify && resp.ID != req.ID {
-			return fn.processError(xerrors.New("request and response id didn't match"))
+			return fn.processError(errors.New("request and response id didn't match"))
 		}
 
 		if fn.valOut != -1 && !fn.returnValueIsChannel {
@@ -743,7 +742,7 @@ const (
 func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 	ftyp := f.Type
 	if ftyp.Kind() != reflect.Func {
-		return reflect.Value{}, xerrors.New("handler field not a func")
+		return reflect.Value{}, errors.New("handler field not a func")
 	}
 
 	name := c.methodNameFormatter(c.namespace, f.Name)
@@ -761,7 +760,7 @@ func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 	fun.valOut, fun.errOut, fun.nout = processFuncOut(ftyp)
 
 	if fun.valOut != -1 && fun.notify {
-		return reflect.Value{}, xerrors.New("notify methods cannot return values")
+		return reflect.Value{}, errors.New("notify methods cannot return values")
 	}
 
 	fun.returnValueIsChannel = fun.valOut != -1 && ftyp.Out(fun.valOut).Kind() == reflect.Chan
@@ -772,7 +771,7 @@ func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 	// note: hasCtx is also the number of the first non-context argument
 	if ftyp.NumIn() > fun.hasCtx && ftyp.In(fun.hasCtx) == rtRawParams {
 		if ftyp.NumIn() > fun.hasCtx+1 {
-			return reflect.Value{}, xerrors.New("raw params can't be mixed with other arguments")
+			return reflect.Value{}, errors.New("raw params can't be mixed with other arguments")
 		}
 		fun.hasRawParams = true
 	}

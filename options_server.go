@@ -4,11 +4,10 @@ import (
 	"context"
 	v1 "encoding/json"
 	"encoding/json/v2"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"time"
-
-	"golang.org/x/xerrors"
 )
 
 // note: we embed reflect.Type because proxy-structs are not comparable
@@ -128,7 +127,7 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 				calls,
 			})
 			if err != nil {
-				return nil, xerrors.Errorf("provide reverse client calls: %w", err)
+				return nil, fmt.Errorf("provide reverse client calls: %w", err)
 			}
 
 			return context.WithValue(ctx, jsonrpcReverseClient{reflect.TypeOf(calls).Elem()}, calls), nil

@@ -2,10 +2,10 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/deorth-kku/go-common"
-	"golang.org/x/xerrors"
 )
 
 type Permission string
@@ -63,7 +63,7 @@ func PermissionedProxy(validPerms, defaultPerms []Permission, in interface{}, ou
 				return fn.Call(args)
 			}
 
-			err := xerrors.Errorf("missing permission to invoke '%s' (need '%s')", field.Name, requiredPerm)
+			err := fmt.Errorf("missing permission to invoke '%s' (need '%s')", field.Name, requiredPerm)
 			rerr := reflect.ValueOf(&err).Elem()
 
 			if field.Type.NumOut() == 2 {

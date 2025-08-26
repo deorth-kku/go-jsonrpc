@@ -25,7 +25,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/xerrors"
 )
 
 func setlog(lv string) {
@@ -135,12 +134,12 @@ func TestRawRequests(t *testing.T) {
 	t.Run("inc-noparam", tc(`{"jsonrpc": "2.0", "method": "SimpleServerHandler.Inc", "id": 2}`, `{"jsonrpc":"2.0","id":2,"result":null}`, 1, 200))
 	t.Run("add", tc(`{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [10], "id": 4}`, `{"jsonrpc":"2.0","id":4,"result":null}`, 10, 200))
 	// Batch requests
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 5}`, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}`, 0, 500))
+	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 5}`, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}`, 0, 500))
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 6}]`, `[{"jsonrpc":"2.0","id":6,"result":null}]`, 123, 200))
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 7},{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-122], "id": 8}]`, `[{"jsonrpc":"2.0","id":7,"result":null},{"jsonrpc":"2.0","id":8,"result":null}]`, 1, 200))
 	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 9},{"jsonrpc": "2.0", "params": [-122], "id": 10}]`, `[{"jsonrpc":"2.0","id":9,"result":null},{"jsonrpc":"2.0","id":10,"error":{"code":-32601,"message":"method '' not found"}}]`, 123, 200))
 	t.Run("add", tc(`     [{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-1], "id": 11}]   `, `[{"jsonrpc":"2.0","id":11,"result":null}]`, -1, 200))
-	t.Run("add", tc(``, `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}`, 0, 400))
+	t.Run("add", tc(``, `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"invalid request"}}`, 0, 400))
 }
 
 func TestReconnection(t *testing.T) {
@@ -1223,10 +1222,10 @@ func TestUserError(t *testing.T) {
 	require.NoError(t, err)
 
 	e := client.Test()
-	require.True(t, xerrors.Is(e, ErrSomethingBad{}))
+	require.True(t, errors.Is(e, ErrSomethingBad{}))
 
 	e = client.TestP()
-	require.True(t, xerrors.Is(e, &ErrSomethingBad{}))
+	require.True(t, errors.Is(e, &ErrSomethingBad{}))
 
 	e = client.TestMy("some event")
 	require.Error(t, e)
@@ -1403,7 +1402,7 @@ func (h *RevCallTestServerHandler) Call(ctx context.Context) error {
 
 	r, err := revClient.CallOnClient(7) // multiply by 2 on client
 	if err != nil {
-		return xerrors.Errorf("call on client: %w", err)
+		return fmt.Errorf("call on client: %w", err)
 	}
 
 	if r != 14 {
@@ -1463,7 +1462,7 @@ func (h *RevCallTestServerHandlerAliased) Call(ctx context.Context) error {
 
 	r, err := revClient.CallOnClient(8) // multiply by 2 on client
 	if err != nil {
-		return xerrors.Errorf("call on client: %w", err)
+		return fmt.Errorf("call on client: %w", err)
 	}
 
 	if r != 16 {
