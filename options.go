@@ -3,18 +3,16 @@ package jsonrpc
 import (
 	"context"
 	v1 "encoding/json"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
 	"log/slog"
 	"net/http"
-	"reflect"
 	"slices"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
-
-type ParamEncoder func(reflect.Value) (reflect.Value, error)
 
 type clientHandler struct {
 	ns  string
@@ -26,8 +24,7 @@ type Config struct {
 	pingInterval     time.Duration
 	timeout          time.Duration
 
-	ParamEncoders map[reflect.Type]ParamEncoder
-	errors        *Errors
+	errors *Errors
 
 	reverseHandlers       []clientHandler
 	aliasedHandlerMethods map[string]string
@@ -46,7 +43,6 @@ type Config struct {
 func (c Config) getclient(namespace string) client {
 	return client{
 		namespace:           namespace,
-		paramEncoders:       c.ParamEncoders,
 		errors:              c.errors,
 		methodNameFormatter: c.methodNamer,
 		logger:              c.logger,
@@ -80,8 +76,6 @@ func defaultConfig() Config {
 		timeout:      30 * time.Second,
 
 		aliasedHandlerMethods: map[string]string{},
-
-		ParamEncoders: map[reflect.Type]ParamEncoder{},
 
 		httpClient: _defaultHTTPClient,
 
@@ -121,15 +115,48 @@ func WithNoReconnect() func(c *Config) {
 	}
 }
 
-func WithParamEncoderT[T any](encoder ParamEncoder) func(c *Config) {
+type (
+	UnmarshalerFunc[T any] = func(*jsontext.Decoder, T) error
+	MarshalerFunc[T any]   = func(*jsontext.Encoder, T) error
+)
+
+func updateUnmarshalers[T any](opts *json.Options, fn UnmarshalerFunc[T]) {
+	if *opts == v1.DefaultOptionsV1() { // limited workaround for https://github.com/golang/go/issues/75149
+		*opts = json.JoinOptions(*opts, json.WithUnmarshalers(json.UnmarshalFromFunc(fn)))
+		return
+	}
+	unmarshalers, ok := json.GetOption(*opts, json.WithUnmarshalers)
+	if ok {
+		unmarshalers = json.JoinUnmarshalers(unmarshalers, json.UnmarshalFromFunc(fn))
+	} else {
+		unmarshalers = json.UnmarshalFromFunc(fn)
+	}
+	*opts = json.JoinOptions(*opts, json.WithUnmarshalers(unmarshalers))
+}
+
+func updateMarshalers[T any](opts *json.Options, fn MarshalerFunc[T]) {
+	if *opts == v1.DefaultOptionsV1() { // limited workaround for https://github.com/golang/go/issues/75149
+		*opts = json.JoinOptions(*opts, json.WithMarshalers(json.MarshalToFunc(fn)))
+		return
+	}
+	marshalers, ok := json.GetOption(*opts, json.WithMarshalers)
+	if ok {
+		marshalers = json.JoinMarshalers(marshalers, json.MarshalToFunc(fn))
+	} else {
+		marshalers = json.MarshalToFunc(fn)
+	}
+	*opts = json.JoinOptions(*opts, json.WithMarshalers(marshalers))
+}
+
+func WithResultUnmarshaler[T any](fn UnmarshalerFunc[*T]) func(c *Config) {
 	return func(c *Config) {
-		c.ParamEncoders[reflect.TypeFor[T]()] = encoder
+		updateUnmarshalers(&c.jsonOptions, fn)
 	}
 }
 
-func WithParamEncoder(t interface{}, encoder ParamEncoder) func(c *Config) {
+func WithParamMarshaler[T any](fn MarshalerFunc[T]) func(c *Config) {
 	return func(c *Config) {
-		c.ParamEncoders[reflect.TypeOf(t).Elem()] = encoder
+		updateMarshalers(&c.jsonOptions, fn)
 	}
 }
 

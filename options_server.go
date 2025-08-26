@@ -20,8 +20,7 @@ type ServerConfig struct {
 	maxRequestSize int64
 	pingInterval   time.Duration
 
-	paramDecoders map[reflect.Type]ParamDecoder
-	errors        *Errors
+	errors *Errors
 
 	reverseClientBuilder func(context.Context, *wsConn) (context.Context, error)
 	tracer               Tracer
@@ -34,7 +33,6 @@ type ServerOption func(c *ServerConfig)
 
 func defaultServerConfig() ServerConfig {
 	return ServerConfig{
-		paramDecoders:  map[reflect.Type]ParamDecoder{},
 		maxRequestSize: DEFAULT_MAX_REQUEST_SIZE,
 
 		pingInterval:        5 * time.Second,
@@ -52,15 +50,15 @@ func (c *ServerConfig) GetJsonOptions() json.Options {
 	return c.jsonOptions
 }
 
-func WithParamDecoderT[T any](decoder ParamDecoder) ServerOption {
+func WithResultMarshaler[T any](fn MarshalerFunc[T]) func(c *ServerConfig) {
 	return func(c *ServerConfig) {
-		c.paramDecoders[reflect.TypeFor[T]()] = decoder
+		updateMarshalers(&c.jsonOptions, fn)
 	}
 }
 
-func WithParamDecoder(t interface{}, decoder ParamDecoder) ServerOption {
+func WithParamUnmarshaler[T any](fn UnmarshalerFunc[*T]) func(c *ServerConfig) {
 	return func(c *ServerConfig) {
-		c.paramDecoders[reflect.TypeOf(t).Elem()] = decoder
+		updateUnmarshalers(&c.jsonOptions, fn)
 	}
 }
 
@@ -115,7 +113,6 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 		c.reverseClientBuilder = func(ctx context.Context, conn *wsConn) (context.Context, error) {
 			cl := client{
 				namespace:           namespace,
-				paramEncoders:       map[reflect.Type]ParamEncoder{},
 				methodNameFormatter: c.methodNameFormatter,
 			}
 

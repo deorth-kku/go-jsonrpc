@@ -1,15 +1,13 @@
 package httpio
 
 import (
-	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"path"
-	"reflect"
 	"sync"
 
 	"github.com/deorth-kku/go-common"
@@ -25,16 +23,18 @@ func ReaderParamEncoder(addr string) jsonrpc.Option {
 	return func(c *jsonrpc.Config) {
 		logger := c.GetLogger()
 		client := c.GetHTTPClient()
-		jsonrpc.WithParamEncoderT[io.Reader](func(value reflect.Value) (reflect.Value, error) {
-			r := common.MustOk(reflect.TypeAssert[io.Reader](value))
-
+		jsonrpc.WithParamMarshaler(func(enc *jsontext.Encoder, rd io.Reader) error {
+			u, err := url.Parse(addr)
+			if err != nil {
+				return err
+			}
 			reqID := uuid.New()
-			u, _ := url.Parse(addr)
-			u.Path = path.Join(u.Path, reqID.String())
-
+			query := u.Query()
+			query.Add("uuid", reqID.String())
+			u.RawQuery = query.Encode()
 			go func() {
 				// TODO: figure out errors here
-				resp, err := client.Post(u.String(), "application/octet-stream", r)
+				resp, err := client.Post(u.String(), "application/octet-stream", rd)
 				if err != nil {
 					logger.Error("sending reader param", "err", err)
 					return
@@ -49,7 +49,7 @@ func ReaderParamEncoder(addr string) jsonrpc.Option {
 
 			}()
 
-			return reflect.ValueOf(reqID), nil
+			return json.MarshalEncode(enc, reqID)
 		})(c)
 	}
 }
@@ -73,23 +73,24 @@ func (w *waitReadCloser) Close() error {
 }
 
 func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
-	var readersLk sync.Mutex
-	readers := map[uuid.UUID]chan *waitReadCloser{}
+	var readers sync.Map // value is [chan *waitReadCloser]
 	var logger *slog.Logger
+
 	hnd := func(resp http.ResponseWriter, req *http.Request) {
-		strId := path.Base(req.URL.Path)
+		strId := req.URL.Query().Get("uuid")
+		if len(strId) == 0 {
+			http.Error(resp, "no uuid arg", 400)
+			return
+		}
 		u, err := uuid.Parse(strId)
 		if err != nil {
 			http.Error(resp, fmt.Sprintf("parsing reader uuid: %s", err), 400)
+			return
 		}
+		defer readers.Delete(u)
 
-		readersLk.Lock()
-		ch, found := readers[u]
-		if !found {
-			ch = make(chan *waitReadCloser)
-			readers[u] = ch
-		}
-		readersLk.Unlock()
+		ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
+		logger.Debug("reader handler get channel", "uuid", u, "ch", ch)
 
 		wr := &waitReadCloser{
 			ReadCloser: req.Body,
@@ -117,33 +118,18 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 
 	dec := func(c *jsonrpc.ServerConfig) {
 		logger = c.GetLogger()
-		jsonrpc.WithParamDecoderT[io.Reader](func(ctx context.Context, b []byte) (reflect.Value, error) {
-			var strId string
-			if err := json.Unmarshal(b, &strId, c.GetJsonOptions()); err != nil {
-				return reflect.Value{}, xerrors.Errorf("unmarshaling reader id: %w", err)
+		jsonrpc.WithParamUnmarshaler(func(dec *jsontext.Decoder, rd *io.Reader) error {
+			var u uuid.UUID
+			if err := json.UnmarshalDecode(dec, &u); err != nil {
+				return xerrors.Errorf("unmarshaling reader id: %w", err)
 			}
+			defer readers.Delete(u)
 
-			u, err := uuid.Parse(strId)
-			if err != nil {
-				return reflect.Value{}, xerrors.Errorf("parsing reader UUDD: %w", err)
-			}
-
-			readersLk.Lock()
-			ch, found := readers[u]
-			if !found {
-				ch = make(chan *waitReadCloser)
-				readers[u] = ch
-			}
-			readersLk.Unlock()
-
-			select {
-			case wr := <-ch:
-				return reflect.ValueOf(wr), nil
-			case <-ctx.Done():
-				return reflect.Value{}, ctx.Err()
-			}
+			ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
+			logger.Debug("reader unmarshal get channel", "uuid", u, "ch", ch)
+			*rd = <-ch
+			return nil
 		})(c)
 	}
-
 	return hnd, dec
 }

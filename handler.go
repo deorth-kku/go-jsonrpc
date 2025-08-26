@@ -81,8 +81,6 @@ type handler struct {
 	// These are used as fallbacks if a method is not found by the given method name.
 	aliasedMethods map[string]string
 
-	paramDecoders map[reflect.Type]ParamDecoder
-
 	methodNameFormatter MethodNameFormatter
 	logger              *slog.Logger
 	jsonOptions         json.Options
@@ -142,7 +140,6 @@ func makeHandler(sc ServerConfig) *handler {
 		errors:  sc.errors,
 
 		aliasedMethods: map[string]string{},
-		paramDecoders:  sc.paramDecoders,
 
 		methodNameFormatter: sc.methodNameFormatter,
 		logger:              sc.logger,
@@ -406,26 +403,13 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			var rp reflect.Value
 
 			typ := handler.paramReceivers[i]
-			dec, found := s.paramDecoders[typ]
-			if !found {
-				rp = reflect.New(typ)
-				if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
-					rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
-					safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-					return
-				}
-				rp = rp.Elem()
-			} else {
-				var err error
-				rp, err = dec(ctx, ps[i].data)
-				if err != nil {
-					rpcError(w, &req, rpcParseError, xerrors.Errorf("decoding params for '%s' (param: %d; custom decoder): %w", req.Method, i, err))
-					safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-					return
-				}
+			rp = reflect.New(typ)
+			if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
+				rpcError(w, &req, rpcParseError, xerrors.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
+				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
+				return
 			}
-
-			callParams[i+1+handler.hasCtx] = reflect.ValueOf(rp.Interface())
+			callParams[i+1+handler.hasCtx] = rp.Elem()
 		}
 	}
 

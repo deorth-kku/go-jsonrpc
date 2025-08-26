@@ -3,11 +3,11 @@ package httpio
 import (
 	"context"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 
 	"github.com/filecoin-project/go-jsonrpc"
@@ -35,9 +35,9 @@ func TestReaderProxy(t *testing.T) {
 	rpcServer := jsonrpc.NewServer(readerServerOpt)
 	rpcServer.Register("ReaderHandler", serverHandler)
 
-	mux := mux.NewRouter()
+	mux := http.NewServeMux()
 	mux.Handle("/rpc/v0", rpcServer)
-	mux.Handle("/rpc/streams/v0/push/{uuid}", readerHandler)
+	mux.Handle("/rpc/streams/v0/push", readerHandler)
 
 	testServ := httptest.NewServer(mux)
 	defer testServ.Close()

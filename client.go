@@ -169,9 +169,8 @@ func NewClient(ctx context.Context, addr string, namespace string, handler inter
 }
 
 type client struct {
-	namespace     string
-	paramEncoders map[reflect.Type]ParamEncoder
-	errors        *Errors
+	namespace string
+	errors    *Errors
 
 	doRequest func(context.Context, clientRequest) (clientResponse, error)
 	exiting   <-chan struct{}
@@ -661,16 +660,6 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	} else {
 		params := make([]param, len(args)-fn.hasCtx)
 		for i, arg := range args[fn.hasCtx:] {
-			enc, found := fn.client.paramEncoders[arg.Type()]
-			if found {
-				// custom param encoder
-				var err error
-				arg, err = enc(arg)
-				if err != nil {
-					return fn.processError(fmt.Errorf("sendRequest failed: %w", err))
-				}
-			}
-
 			params[i] = param{
 				v: arg,
 			}

@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1107,13 +1106,13 @@ func TestInterfaceHandler(t *testing.T) {
 
 	serverHandler := &InterfaceHandler{}
 
-	rpcServer := NewServer(WithParamDecoder(new(io.Reader), readerDec))
+	rpcServer := NewServer(WithParamUnmarshaler(readerDec))
 	rpcServer.Register("InterfaceHandler", serverHandler)
 
 	testServ := httptest.NewServer(rpcServer)
 	defer testServ.Close()
 
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "InterfaceHandler", []interface{}{&client}, nil, WithParamEncoder(new(io.Reader), readerEnc))
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "InterfaceHandler", []interface{}{&client}, nil, WithParamMarshaler(readerEnc))
 	require.NoError(t, err)
 
 	defer closer()
@@ -1129,29 +1128,25 @@ var (
 	readerRegisteryLk sync.Mutex
 )
 
-func readerEnc(rin reflect.Value) (reflect.Value, error) {
-	reader := common.MustOk(reflect.TypeAssert[io.Reader](rin))
-
+func readerEnc(enc *jsontext.Encoder, rd io.Reader) error {
 	readerRegisteryLk.Lock()
 	defer readerRegisteryLk.Unlock()
-
 	n := readerRegisteryN
 	readerRegisteryN++
-
-	readerRegistery[n] = reader
-	return reflect.ValueOf(n), nil
+	readerRegistery[n] = rd
+	return json.MarshalEncode(enc, n)
 }
 
-func readerDec(ctx context.Context, rin []byte) (reflect.Value, error) {
+func readerDec(dec *jsontext.Decoder, rd *io.Reader) error {
 	var id int
-	if err := json.Unmarshal(rin, &id, v1opts); err != nil {
-		return reflect.Value{}, err
+	if err := json.UnmarshalDecode(dec, &id); err != nil {
+		return err
 	}
 
 	readerRegisteryLk.Lock()
 	defer readerRegisteryLk.Unlock()
-
-	return reflect.ValueOf(readerRegistery[id]), nil
+	*rd = readerRegistery[id]
+	return nil
 }
 
 type ErrSomethingBad struct{}
