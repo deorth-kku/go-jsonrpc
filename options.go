@@ -66,6 +66,11 @@ func (c *Config) GetHTTPClient() *http.Client {
 	return c.httpClient
 }
 
+func jsonDefault() json.Options {
+	// workaround for https://github.com/golang/go/issues/75149
+	return json.JoinOptions(v1.DefaultOptionsV1(), json.WithMarshalers(nil), json.WithUnmarshalers(nil))
+}
+
 func defaultConfig() Config {
 	return Config{
 		reconnectBackoff: backoff{
@@ -81,7 +86,7 @@ func defaultConfig() Config {
 
 		methodNamer: DefaultMethodNameFormatter,
 		logger:      slog.Default(),
-		jsonOptions: v1.DefaultOptionsV1(),
+		jsonOptions: jsonDefault(),
 	}
 }
 
@@ -121,10 +126,6 @@ type (
 )
 
 func updateUnmarshalers[T any](opts *json.Options, fn UnmarshalerFunc[T]) {
-	if *opts == v1.DefaultOptionsV1() { // limited workaround for https://github.com/golang/go/issues/75149
-		*opts = json.JoinOptions(*opts, json.WithUnmarshalers(json.UnmarshalFromFunc(fn)))
-		return
-	}
 	unmarshalers, ok := json.GetOption(*opts, json.WithUnmarshalers)
 	if ok {
 		unmarshalers = json.JoinUnmarshalers(unmarshalers, json.UnmarshalFromFunc(fn))
@@ -135,10 +136,6 @@ func updateUnmarshalers[T any](opts *json.Options, fn UnmarshalerFunc[T]) {
 }
 
 func updateMarshalers[T any](opts *json.Options, fn MarshalerFunc[T]) {
-	if *opts == v1.DefaultOptionsV1() { // limited workaround for https://github.com/golang/go/issues/75149
-		*opts = json.JoinOptions(*opts, json.WithMarshalers(json.MarshalToFunc(fn)))
-		return
-	}
 	marshalers, ok := json.GetOption(*opts, json.WithMarshalers)
 	if ok {
 		marshalers = json.JoinMarshalers(marshalers, json.MarshalToFunc(fn))

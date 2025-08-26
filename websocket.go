@@ -114,7 +114,7 @@ type wsConn struct {
 	registerCh chan outChanReg
 }
 
-func loadAssert[T any](loadf func(any) (any, bool), key any) (t T, ok bool) {
+func LoadAssert[T any](loadf func(any) (any, bool), key any) (t T, ok bool) {
 	v, ok := loadf(key)
 	if !ok {
 		return t, false
@@ -386,7 +386,7 @@ func (c *wsConn) cancelCtx(req frame) {
 		return
 	}
 
-	cf, ok := loadAssert[context.CancelFunc](c.handling.Load, params[0])
+	cf, ok := LoadAssert[context.CancelFunc](c.handling.Load, params[0])
 	if ok {
 		cf()
 	} else {
@@ -416,7 +416,7 @@ func (c *wsConn) handleChanMessage(frame frame) {
 		return
 	}
 
-	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.Load, chid)
+	hnd, ok := LoadAssert[*chanHandler](c.chanHandlers.Load, chid)
 	if !ok {
 		c.getlogger().Error("xrpc.ch.val: handler not found", "reqID", frame.ID, "chid", chid)
 		return
@@ -444,7 +444,7 @@ func (c *wsConn) handleChanClose(frame frame) {
 		return
 	}
 
-	hnd, ok := loadAssert[*chanHandler](c.chanHandlers.LoadAndDelete, chid)
+	hnd, ok := LoadAssert[*chanHandler](c.chanHandlers.LoadAndDelete, chid)
 	if !ok {
 		c.getlogger().Error("xrpc.ch.val: handler not found", "reqID", frame.ID, "chid", chid)
 		return
@@ -457,7 +457,7 @@ func (c *wsConn) handleChanClose(frame frame) {
 }
 
 func (c *wsConn) handleResponse(frame frame) {
-	req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
+	req, ok := LoadAssert[clientRequest](c.inflight.Load, frame.ID)
 	if !ok {
 		c.getlogger().Error("client got unknown ID in response", "reqID", frame.ID)
 		return
@@ -678,7 +678,7 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 	// r = io.TeeReader(r, os.Stderr)
 	var frame frame
 	frame.Result.functy = func() reflect.Type {
-		req, ok := loadAssert[clientRequest](c.inflight.Load, frame.ID)
+		req, ok := LoadAssert[clientRequest](c.inflight.Load, frame.ID)
 		if !ok {
 			return nil
 		}

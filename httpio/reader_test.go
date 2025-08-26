@@ -3,10 +3,10 @@ package httpio
 import (
 	"context"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -20,35 +20,50 @@ func (h *ReaderHandler) ReadAll(ctx context.Context, r io.Reader) ([]byte, error
 	return io.ReadAll(r)
 }
 
-func (h *ReaderHandler) ReadUrl(ctx context.Context, u string) (string, error) {
-	return u, nil
+func (h *ReaderHandler) StringReader(ctx context.Context, u string) (io.Reader, error) {
+	return strings.NewReader(u), nil
 }
 
 func TestReaderProxy(t *testing.T) {
-	var client struct {
-		ReadAll func(ctx context.Context, r io.Reader) ([]byte, error)
-	}
-
 	serverHandler := &ReaderHandler{}
 
-	readerHandler, readerServerOpt := ReaderParamDecoder()
-	rpcServer := jsonrpc.NewServer(readerServerOpt)
+	pdh, pdopt := ReaderParamDecoder()
+	reh, reopt := ReaderResultEncoder()
+	rpcServer := jsonrpc.NewServer(pdopt, reopt)
 	rpcServer.Register("ReaderHandler", serverHandler)
 
-	mux := http.NewServeMux()
-	mux.Handle("/rpc/v0", rpcServer)
-	mux.Handle("/rpc/streams/v0/push", readerHandler)
-
+	mux := MuxRPCServerWithReader(rpcServer, pdh, reh)
 	testServ := httptest.NewServer(mux)
 	defer testServ.Close()
 
-	re := ReaderParamEncoder("http://" + testServ.Listener.Addr().String() + "/rpc/streams/v0/push")
-	closer, err := jsonrpc.NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String()+"/rpc/v0", "ReaderHandler", []interface{}{&client}, nil, re)
-	require.NoError(t, err)
+	full_url := "http://" + testServ.Listener.Addr().String() + "/rpc"
+	rd := WithResultDecoder(full_url, time.Second)
+	pe := ReaderParamEncoder(full_url, time.Second)
 
-	defer closer()
+	const potatos = "pooooootato"
 
-	read, err := client.ReadAll(context.TODO(), strings.NewReader("pooooootato"))
-	require.NoError(t, err)
-	require.Equal(t, "pooooootato", string(read), "potatos weren't equal")
+	for name, url := range map[string]string{
+		"http": full_url, // since http uses POST and ws uses GET, we need to test both to make sure [MuxRPCServerWithReader] works as intended
+		"ws":   "ws://" + testServ.Listener.Addr().String() + "/rpc/v0",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var client struct {
+				ReadAll      func(ctx context.Context, r io.Reader) ([]byte, error)
+				StringReader func(ctx context.Context, u string) (io.Reader, error)
+			}
+			closer, err := jsonrpc.NewMergeClient(context.Background(), url, "ReaderHandler", []interface{}{&client}, nil, pe, rd)
+			require.NoError(t, err)
+			defer closer()
+
+			read, err := client.ReadAll(context.TODO(), strings.NewReader(potatos))
+			require.NoError(t, err)
+			require.Equal(t, potatos, string(read), "potatos weren't equal")
+
+			reader, err := client.StringReader(context.TODO(), potatos)
+			require.NoError(t, err)
+			str, err := readString(reader)
+			require.NoError(t, err)
+			require.Equal(t, potatos, str, "potatos weren't equal")
+		})
+	}
 }

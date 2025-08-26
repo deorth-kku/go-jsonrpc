@@ -2,7 +2,6 @@ package jsonrpc
 
 import (
 	"context"
-	v1 "encoding/json"
 	"encoding/json/v2"
 	"fmt"
 	"log/slog"
@@ -37,7 +36,7 @@ func defaultServerConfig() ServerConfig {
 		pingInterval:        5 * time.Second,
 		methodNameFormatter: DefaultMethodNameFormatter,
 		logger:              slog.Default(),
-		jsonOptions:         v1.DefaultOptionsV1(),
+		jsonOptions:         jsonDefault(),
 	}
 }
 
