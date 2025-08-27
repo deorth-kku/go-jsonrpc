@@ -465,7 +465,7 @@ func (c *client) provide(outs []any) error {
 
 		val := reflect.ValueOf(handler)
 
-		for i := 0; i < typ.NumField(); i++ {
+		for i := range typ.NumField() {
 			fn, err := c.makeRpcFunc(typ.Field(i))
 			if err != nil {
 				return err

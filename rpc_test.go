@@ -482,14 +482,12 @@ func TestParallelRPC(t *testing.T) {
 	defer closer()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 100 {
+		wg.Go(func() {
+			for range 100 {
 				require.NoError(t, client.Add(2))
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -944,7 +942,7 @@ func TestServerChanLockClose(t *testing.T) {
 	}()
 	require.Equal(t, 2, <-sub)
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		serverHandler.wait <- struct{}{}
 	}
 
@@ -964,7 +962,7 @@ func (h *StreamingHandler) GetData(ctx context.Context, n int) (<-chan int, erro
 	go func() {
 		defer close(out)
 
-		for i := 0; i < n; i++ {
+		for i := range n {
 			out <- i
 		}
 	}()
@@ -1003,7 +1001,7 @@ func TestChanClientReceiveAll(t *testing.T) {
 	sub, err := client.GetData(ctx, 100)
 	require.NoError(t, err)
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		select {
 		case v, ok := <-sub:
 			if !ok {
@@ -1058,7 +1056,7 @@ func testControlChanDeadlock(t *testing.T) {
 
 	defer closer()
 
-	for i := 0; i < n; i++ {
+	for range n {
 		serverHandler.wait <- struct{}{}
 	}
 
@@ -1072,7 +1070,7 @@ func testControlChanDeadlock(t *testing.T) {
 
 	go func() {
 		defer close(done)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if <-sub != i+1 {
 				panic("bad!")
 				// require.Equal(t, i+1, <-sub)
@@ -1082,7 +1080,7 @@ func testControlChanDeadlock(t *testing.T) {
 
 	// reset this channel so its not shared between the sub requests...
 	serverHandler.wait = make(chan struct{}, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		serverHandler.wait <- struct{}{}
 	}
 
@@ -1575,11 +1573,11 @@ func (h *BigCallTestServerHandler) Do() (RecRes, error) {
 	var res RecRes
 	res.I = 123
 
-	for i := 0; i < 15000; i++ {
+	for i := range 15000 {
 		var ires RecRes
 		ires.I = i
 
-		for j := 0; j < 15000; j++ {
+		for j := range 15000 {
 			var jres RecRes
 			jres.I = j
 

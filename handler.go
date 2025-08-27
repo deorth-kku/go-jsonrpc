@@ -156,7 +156,7 @@ func (s *handler) register(namespace string, r any) {
 	val := reflect.ValueOf(r)
 	// TODO: expect ptr
 
-	for i := 0; i < val.NumMethod(); i++ {
+	for i := range val.NumMethod() {
 		method := val.Type().Method(i)
 
 		funcType := method.Func.Type()
@@ -168,7 +168,7 @@ func (s *handler) register(namespace string, r any) {
 		hasRawParams := false
 		ins := funcType.NumIn() - 1 - hasCtx
 		recvs := make([]reflect.Type, ins)
-		for i := 0; i < ins; i++ {
+		for i := range ins {
 			if hasRawParams && i > 0 {
 				panic("raw params must be the last parameter")
 			}
@@ -398,11 +398,8 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 			return
 		}
 
-		for i := 0; i < handler.nParams; i++ {
-			var rp reflect.Value
-
-			typ := handler.paramReceivers[i]
-			rp = reflect.New(typ)
+		for i := range handler.nParams {
+			rp := reflect.New(handler.paramReceivers[i])
 			if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
 				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
