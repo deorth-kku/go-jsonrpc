@@ -58,10 +58,11 @@ func newRequest(u *url.URL, method string, body io.Reader, timeout time.Duration
 // Parameters:
 //   - addr: the full http url that reader server is served on.
 //   - timeout: timeout for the whole http request. 0 for no timeout.
-func ReaderParamEncoder(addr string, timeout time.Duration) jsonrpc.Option {
+func ReaderParamEncoder(addr string) jsonrpc.Option {
 	return func(c *jsonrpc.Config) {
 		logger := c.GetLogger()
 		client := c.GetHTTPClient()
+		timeout := c.GetTimeout()
 		jsonrpc.WithParamMarshaler(func(enc *jsontext.Encoder, rd io.Reader) error {
 			reqID := uuid.New()
 			u, err := urlWithUUID(addr, reqID)
@@ -91,9 +92,10 @@ func ReaderParamEncoder(addr string, timeout time.Duration) jsonrpc.Option {
 	}
 }
 
-func WithResultDecoder(addr string, timeout time.Duration) jsonrpc.Option {
+func ReaderResultDecoder(addr string) jsonrpc.Option {
 	return func(c *jsonrpc.Config) {
 		client := c.GetHTTPClient()
+		timeout := c.GetTimeout()
 		jsonrpc.WithResultUnmarshaler(func(dec *jsontext.Decoder, rd *io.Reader) error {
 			var reqID uuid.UUID
 			err := json.UnmarshalDecode(dec, &reqID)

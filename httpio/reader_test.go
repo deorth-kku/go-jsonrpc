@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -37,8 +36,8 @@ func TestReaderProxy(t *testing.T) {
 	defer testServ.Close()
 
 	full_url := "http://" + testServ.Listener.Addr().String() + "/rpc"
-	rd := WithResultDecoder(full_url, time.Second)
-	pe := ReaderParamEncoder(full_url, time.Second)
+	rd := ReaderResultDecoder(full_url)
+	pe := ReaderParamEncoder(full_url)
 
 	const potatos = "pooooootato"
 

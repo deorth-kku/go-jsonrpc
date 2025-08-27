@@ -54,6 +54,10 @@ func (c *Config) handle(context.Context, request, func(func(io.Writer)), rpcErrF
 	c.logger.Error("handleCall on client with no reverse handler")
 }
 
+func (c *Config) GetTimeout() time.Duration {
+	return c.timeout
+}
+
 func (c *Config) GetLogger() *slog.Logger {
 	return c.logger
 }
