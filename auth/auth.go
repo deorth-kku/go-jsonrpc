@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/deorth-kku/go-common"
 )
@@ -24,19 +25,14 @@ func HasPerm(ctx context.Context, defaultPerms []Permission, perm Permission) bo
 		callerPerms = defaultPerms
 	}
 
-	for _, callerPerm := range callerPerms {
-		if callerPerm == perm {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(callerPerms, perm)
 }
 
 func PermissionedProxy(validPerms, defaultPerms []Permission, in any, out any) {
 	rint := reflect.ValueOf(out).Elem()
 	ra := reflect.ValueOf(in)
 
-	for f := 0; f < rint.NumField(); f++ {
+	for f := range rint.NumField() {
 		field := rint.Type().Field(f)
 		requiredPerm := Permission(field.Tag.Get("perm"))
 		if requiredPerm == "" {
@@ -44,13 +40,7 @@ func PermissionedProxy(validPerms, defaultPerms []Permission, in any, out any) {
 		}
 
 		// Validate perm tag
-		ok := false
-		for _, perm := range validPerms {
-			if requiredPerm == perm {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(validPerms, requiredPerm)
 		if !ok {
 			panic("unknown 'perm' tag on " + field.Name) // ok
 		}

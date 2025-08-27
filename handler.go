@@ -13,19 +13,30 @@ import (
 	"runtime"
 )
 
-type RawParams jsontext.Value
-
-var rtRawParams = reflect.TypeFor[RawParams]()
-
-// todo is there a better way to tell 'struct with any number of fields'?
-func DecodeParams[T any](p RawParams, opts ...json.Options) (T, error) {
-	var t T
-	err := json.Unmarshal(p, &t, opts...)
-
-	// todo also handle list-encoding automagically (json.Unmarshal doesn't do that, does it?)
-
-	return t, err
+// Object is my solution for named params in golang.
+// Use an Object[T] type as the only param (except for context) in method, then its corresponded json object will be for "params" field in rpc call.
+// T must be a Go struct, jsontext.Value, map[~string]T, or an unnamed pointer to such types.
+// You can use Object[jsontext.Value] to get the usage similar to the old RawParams type.
+type Object[T any] struct {
+	Value T `json:",inline"`
 }
+
+func (Object[T]) isObject() {}
+
+func GetObject[T any](v T) Object[T] {
+	return Object[T]{
+		Value: v,
+	}
+}
+
+type isObject interface {
+	isObject()
+}
+
+var (
+	_            isObject = (Object[struct{}]{})
+	isObjectType          = reflect.TypeFor[isObject]()
+)
 
 // methodHandler is a handler for a single method
 type methodHandler struct {
@@ -35,8 +46,8 @@ type methodHandler struct {
 	receiver    reflect.Value
 	handlerFunc reflect.Value
 
-	hasCtx       int
-	hasRawParams bool
+	hasCtx          int
+	hasObjectParams bool
 
 	errOut int
 	valOut int
@@ -165,15 +176,15 @@ func (s *handler) register(namespace string, r any) {
 			hasCtx = 1
 		}
 
-		hasRawParams := false
+		hasObjectParams := false
 		ins := funcType.NumIn() - 1 - hasCtx
 		recvs := make([]reflect.Type, ins)
 		for i := range ins {
-			if hasRawParams && i > 0 {
-				panic("raw params must be the last parameter")
+			if hasObjectParams && i > 0 {
+				panic("object params must be the last parameter")
 			}
-			if funcType.In(i+1+hasCtx) == rtRawParams {
-				hasRawParams = true
+			if funcType.In(i + 1 + hasCtx).Implements(isObjectType) {
+				hasObjectParams = true
 			}
 			recvs[i] = method.Type.In(i + 1 + hasCtx)
 		}
@@ -187,8 +198,8 @@ func (s *handler) register(namespace string, r any) {
 			handlerFunc: method.Func,
 			receiver:    val,
 
-			hasCtx:       hasCtx,
-			hasRawParams: hasRawParams,
+			hasCtx:          hasCtx,
+			hasObjectParams: hasObjectParams,
 
 			errOut: errOut,
 			valOut: valOut,
@@ -372,14 +383,18 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 		callParams[1] = reflect.ValueOf(ctx)
 	}
 
-	if handler.hasRawParams {
-		// When hasRawParams is true, there is only one parameter and it is a
-		// json.RawMessage.
-
-		callParams[1+handler.hasCtx] = reflect.ValueOf(RawParams(req.Params))
+	if handler.hasObjectParams {
+		// When hasObjectParams is true, there is only one parameter and it is a [Object].
+		// this is my way to do named params in Golang
+		rp := reflect.New(handler.paramReceivers[0])
+		if err := json.Unmarshal(req.Params, rp.Interface(), s.jsonOptions); err != nil {
+			rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
+			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
+			return
+		}
+		callParams[1+handler.hasCtx] = rp.Elem()
 	} else {
-		// "normal" param list; no good way to do named params in Golang
-
+		// "normal" array param list
 		var ps []param
 		if len(req.Params) > 0 {
 			err := json.Unmarshal(req.Params, &ps, s.jsonOptions)

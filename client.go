@@ -600,7 +600,7 @@ type rpcFunc struct {
 	// Used as the number of the first non-context argument.
 	hasCtx int
 
-	hasRawParams         bool
+	hasObjectParams      bool
 	returnValueIsChannel bool
 
 	retry  bool
@@ -654,8 +654,12 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 
 	var serializedParams jsontext.Value
 
-	if fn.hasRawParams {
-		serializedParams = jsontext.Value(common.MustOk(reflect.TypeAssert[RawParams](args[fn.hasCtx])))
+	if fn.hasObjectParams {
+		var err error
+		serializedParams, err = json.Marshal(args[fn.hasCtx].Interface(), fn.client.jsonOption)
+		if err != nil {
+			return fn.processError(fmt.Errorf("marshaling object params failed: %w", err))
+		}
 	} else {
 		params := make([]param, len(args)-fn.hasCtx)
 		for i, arg := range args[fn.hasCtx:] {
@@ -769,11 +773,11 @@ func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 		fun.hasCtx = 1
 	}
 	// note: hasCtx is also the number of the first non-context argument
-	if ftyp.NumIn() > fun.hasCtx && ftyp.In(fun.hasCtx) == rtRawParams {
+	if ftyp.NumIn() > fun.hasCtx && ftyp.In(fun.hasCtx).Implements(isObjectType) {
 		if ftyp.NumIn() > fun.hasCtx+1 {
 			return reflect.Value{}, errors.New("raw params can't be mixed with other arguments")
 		}
-		fun.hasRawParams = true
+		fun.hasObjectParams = true
 	}
 
 	return reflect.MakeFunc(ftyp, fun.handleRpcCall), nil

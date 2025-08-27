@@ -1029,7 +1029,7 @@ func TestControlChanDeadlock(t *testing.T) {
 		}()
 	}
 
-	for r := 0; r < 20; r++ {
+	for range 20 {
 		testControlChanDeadlock(t)
 	}
 }
@@ -1345,26 +1345,37 @@ func TestNotif(t *testing.T) {
 	t.Run("http", tc("http"))
 }
 
-type RawParamHandler struct {
+type ObjectParamHandler struct {
 }
 
 type CustomParams struct {
 	I int
 }
 
-func (h *RawParamHandler) Call(ctx context.Context, ps RawParams) (int, error) {
-	p, err := DecodeParams[CustomParams](ps)
-	if err != nil {
-		return 0, err
-	}
-	return p.I + 1, nil
+var (
+	_ json.UnmarshalerFrom = (*CustomParams)(nil)
+	_ json.MarshalerTo     = (*CustomParams)(nil)
+)
+
+func (CustomParams) MarshalJSONTo(*jsontext.Encoder) error {
+	// no idea why, but it seems that marshaler methods won't be call for the inlined field.
+	// this behavior is inconsistent with the documentation. https://pkg.go.dev/encoding/json/v2
+	return errors.ErrUnsupported
 }
 
-func TestCallWithRawParams(t *testing.T) {
+func (CustomParams) UnmarshalJSONFrom(*jsontext.Decoder) error {
+	return errors.ErrUnsupported
+}
+
+func (h *ObjectParamHandler) Call(ctx context.Context, ps Object[CustomParams]) (int, error) {
+	return ps.Value.I + 1, nil
+}
+
+func TestCallWithObjectParams(t *testing.T) {
 	// setup server
 
 	rpcServer := NewServer()
-	rpcServer.Register("Raw", &RawParamHandler{})
+	rpcServer.Register("Raw", &ObjectParamHandler{})
 
 	// httptest stuff
 	testServ := httptest.NewServer(rpcServer)
@@ -1372,7 +1383,7 @@ func TestCallWithRawParams(t *testing.T) {
 
 	// setup client
 	var client struct {
-		Call func(ctx context.Context, ps RawParams) (int, error)
+		Call func(ctx context.Context, ps Object[CustomParams]) (int, error)
 	}
 	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Raw", []any{
 		&client,
@@ -1382,7 +1393,7 @@ func TestCallWithRawParams(t *testing.T) {
 	// do the call!
 
 	// this will block if it's not sent as a notification
-	n, err := client.Call(context.Background(), []byte(`{"I": 1}`))
+	n, err := client.Call(context.Background(), GetObject(CustomParams{I: 1}))
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
 
@@ -1712,7 +1723,7 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 	// setup server
 
 	rpcServer := NewServer(WithServerMethodNameFormatter(func(namespace, method string) string { return namespace + "_" + method }))
-	rpcServer.Register("Server", &RawParamHandler{})
+	rpcServer.Register("Server", &ObjectParamHandler{})
 
 	// httptest stuff
 	testServ := httptest.NewServer(rpcServer)
@@ -1721,7 +1732,7 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 	// setup client
 
 	var client struct {
-		Call func(ctx context.Context, ps RawParams) error `rpc_method:"Server_Call"`
+		Call func(ctx context.Context, ps Object[CustomParams]) error `rpc_method:"Server_Call"`
 	}
 	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
@@ -1730,7 +1741,7 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 
 	// do the call!
 
-	e := client.Call(context.Background(), []byte(`{"I": 1}`))
+	e := client.Call(context.Background(), GetObject(CustomParams{I: 1}))
 	require.NoError(t, e)
 
 	closer()
@@ -1738,7 +1749,7 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 
 type MethodTransformedHandler struct{}
 
-func (h *RawParamHandler) CallSomethingInSnakeCase(ctx context.Context, v int) (int, error) {
+func (h *ObjectParamHandler) CallSomethingInSnakeCase(ctx context.Context, v int) (int, error) {
 	return v + 1, nil
 }
 
