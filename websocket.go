@@ -28,7 +28,7 @@ var debugTrace = os.Getenv("JSONRPC_ENABLE_DEBUG_TRACE") == "1"
 type frame struct {
 	// common
 	Jsonrpc string            `json:"jsonrpc"`
-	ID      interface{}       `json:"id,omitzero"`
+	ID      any               `json:"id,omitzero"`
 	Meta    map[string]string `json:"meta,omitzero"`
 
 	// request
@@ -53,7 +53,7 @@ func (f *frame) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 }
 
 type outChanReg struct {
-	reqID interface{}
+	reqID any
 
 	chID uint64
 	ch   reflect.Value
@@ -322,7 +322,7 @@ func (c *wsConn) handleOutChans() {
 }
 
 // handleChanOut registers output channel for forwarding to client
-func (c *wsConn) handleChanOut(ch reflect.Value, req interface{}) error {
+func (c *wsConn) handleChanOut(ch reflect.Value, req any) error {
 	c.spawnOutChanHandlerOnce.Do(func() {
 		go c.handleOutChans()
 	})
@@ -352,7 +352,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req interface{}) error {
 //	This should also probably be a single goroutine,
 //	Note that not doing this should be fine for now as long as we are using
 //	contexts correctly (cancelling when async functions are no longer is use)
-func (c *wsConn) handleCtxAsync(actx context.Context, id interface{}) {
+func (c *wsConn) handleCtxAsync(actx context.Context, id any) {
 	<-actx.Done()
 
 	rp, err := json.Marshal([]any{id}, c.jsonOptions())
@@ -925,7 +925,7 @@ func (c *wsConn) resetReadDeadline() {
 
 // Takes an ID as received on the wire, validates it, and translates it to a
 // normalized ID appropriate for keying.
-func normalizeID(id interface{}) (interface{}, error) {
+func normalizeID(id any) (any, error) {
 	switch v := id.(type) {
 	case string, float64, nil:
 		return v, nil

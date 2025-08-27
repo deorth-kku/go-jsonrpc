@@ -107,9 +107,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 	}
 
 	lbl := pprof.Labels("jrpc-mode", "wsserver", "jrpc-remote", r.RemoteAddr, "jrpc-uuid", uuid.New().String())
-	pprof.Do(ctx, lbl, func(ctx context.Context) {
-		wc.handleWsConn(ctx)
-	})
+	pprof.Do(ctx, lbl, wc.handleWsConn)
 
 	if err := c.Close(); err != nil {
 		s.logger.Error("closing websocket connection", "error", err)
@@ -179,7 +177,7 @@ func rpcError(logger *slog.Logger, jopts json.Options) rpcErrFunc {
 // Register registers new RPC handler
 //
 // Handler is any value with methods defined
-func (s *RPCServer) Register(namespace string, handler interface{}) {
+func (s *RPCServer) Register(namespace string, handler any) {
 	s.register(namespace, handler)
 }
 

@@ -163,8 +163,8 @@ type ClientCloser func()
 // handler must be pointer to a struct with function fields
 // Returned value closes the client connection
 // TODO: Example
-func NewClient(ctx context.Context, addr string, namespace string, handler interface{}, requestHeader http.Header) (ClientCloser, error) {
-	return NewMergeClient(ctx, addr, namespace, []interface{}{handler}, requestHeader)
+func NewClient(ctx context.Context, addr string, namespace string, handler any, requestHeader http.Header) (ClientCloser, error) {
+	return NewMergeClient(ctx, addr, namespace, []any{handler}, requestHeader)
 }
 
 type client struct {
@@ -182,7 +182,7 @@ type client struct {
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
 // to be filled in the same namespace, using one connection
-func NewMergeClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, opts ...Option) (ClientCloser, error) {
+func NewMergeClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, opts ...Option) (ClientCloser, error) {
 	config := defaultConfig()
 	for _, o := range opts {
 		o(&config)
@@ -205,7 +205,7 @@ func NewMergeClient(ctx context.Context, addr string, namespace string, outs []i
 }
 
 // NewCustomClient is like NewMergeClient in single-request (http) mode, except it allows for a custom doRequest function
-func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx context.Context, body []byte) (io.ReadCloser, error), opts ...Option) (ClientCloser, error) {
+func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Context, body []byte) (io.ReadCloser, error), opts ...Option) (ClientCloser, error) {
 	config := defaultConfig()
 	for _, o := range opts {
 		o(&config)
@@ -257,7 +257,7 @@ func NewCustomClient(namespace string, outs []interface{}, doRequest func(ctx co
 	}, nil
 }
 
-func httpClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
+func httpClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
 	c := config.getclient(namespace)
 
 	stop := make(chan struct{})
@@ -323,7 +323,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []inter
 	}, nil
 }
 
-func websocketClient(ctx context.Context, addr string, namespace string, outs []interface{}, requestHeader http.Header, config Config) (ClientCloser, error) {
+func websocketClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
 	if config.wsDialer == nil {
 		config.wsDialer = websocket.DefaultDialer
 	}
@@ -452,7 +452,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 	return requests
 }
 
-func (c *client) provide(outs []interface{}) error {
+func (c *client) provide(outs []any) error {
 	for _, handler := range outs {
 		htyp := reflect.TypeOf(handler)
 		if htyp.Kind() != reflect.Ptr {
@@ -642,7 +642,7 @@ func (fn *rpcFunc) processError(err error) []reflect.Value {
 }
 
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
-	var id interface{}
+	var id any
 	if !fn.notify {
 		id = float64(atomic.AddInt64(&fn.client.idCtr, 1))
 		// Prepare the ID to send on the wire.

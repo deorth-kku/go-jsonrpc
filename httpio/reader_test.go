@@ -48,7 +48,7 @@ func TestReaderProxy(t *testing.T) {
 				ReadAll      func(ctx context.Context, r io.Reader) ([]byte, error)
 				StringReader func(ctx context.Context, u string) (io.Reader, error)
 			}
-			closer, err := jsonrpc.NewMergeClient(context.Background(), url, "ReaderHandler", []interface{}{&client}, nil, pe, rd)
+			closer, err := jsonrpc.NewMergeClient(context.Background(), url, "ReaderHandler", []any{&client}, nil, pe, rd)
 			require.NoError(t, err)
 			defer closer()
 

@@ -51,7 +51,7 @@ func RegisterError[T error](errs Errors, code ErrorCode) {
 }
 
 // Deprecated: Use [RegisterError] instead for type-safe operations
-func (e *Errors) Register(c ErrorCode, typ interface{}) {
+func (e *Errors) Register(c ErrorCode, typ any) {
 	rt := reflect.TypeOf(typ).Elem()
 	if !rt.Implements(errorType) {
 		panic("can't register non-error types")

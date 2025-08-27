@@ -12,8 +12,8 @@ import (
 
 type response struct {
 	Jsonrpc string        `json:"jsonrpc"`
-	Result  interface{}   `json:"result,omitzero"`
-	ID      interface{}   `json:"id,omitzero"`
+	Result  any           `json:"result,omitzero"`
+	ID      any           `json:"id,omitzero"`
 	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
@@ -71,7 +71,7 @@ type JSONRPCError struct {
 	Code    ErrorCode      `json:"code"`
 	Message string         `json:"message"`
 	Meta    jsontext.Value `json:"meta,omitzero"`
-	Data    interface{}    `json:"data,omitzero"`
+	Data    any            `json:"data,omitzero"`
 }
 
 func (e *JSONRPCError) Error() string {

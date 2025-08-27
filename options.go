@@ -16,7 +16,7 @@ import (
 
 type clientHandler struct {
 	ns  string
-	hnd interface{}
+	hnd any
 }
 
 type Config struct {
@@ -72,7 +72,29 @@ func (c *Config) GetHTTPClient() *http.Client {
 
 func jsonDefault() json.Options {
 	// workaround for https://github.com/golang/go/issues/75149
-	return json.JoinOptions(v1.DefaultOptionsV1(), json.WithMarshalers(nil), json.WithUnmarshalers(nil))
+	return json.JoinOptions(
+		v1.CallMethodsWithLegacySemantics(true),
+		v1.FormatByteArrayAsArray(true),
+		v1.FormatBytesWithLegacySemantics(true),
+		v1.FormatDurationAsNano(true),
+		v1.MatchCaseSensitiveDelimiter(true),
+		v1.MergeWithLegacySemantics(true),
+		v1.OmitEmptyWithLegacySemantics(true),
+		v1.ParseBytesWithLooseRFC4648(true),
+		v1.ParseTimeWithLooseRFC3339(true),
+		v1.ReportErrorsWithLegacySemantics(true),
+		v1.StringifyWithLegacySemantics(true),
+		v1.UnmarshalArrayFromAnyLength(true),
+		json.Deterministic(true),
+		json.FormatNilMapAsNull(true),
+		json.FormatNilSliceAsNull(true),
+		json.MatchCaseInsensitiveNames(true),
+		jsontext.AllowDuplicateNames(true),
+		jsontext.AllowInvalidUTF8(true),
+		jsontext.EscapeForHTML(true),
+		jsontext.EscapeForJS(true),
+		jsontext.PreserveRawStrings(true),
+	)
 }
 
 func defaultConfig() Config {
@@ -188,7 +210,7 @@ func WithErrors(es Errors) func(c *Config) {
 	}
 }
 
-func WithClientHandler(ns string, hnd interface{}) func(c *Config) {
+func WithClientHandler(ns string, hnd any) func(c *Config) {
 	return func(c *Config) {
 		c.reverseHandlers = append(c.reverseHandlers, clientHandler{ns, hnd})
 	}

@@ -46,7 +46,7 @@ type methodHandler struct {
 
 type request struct {
 	Jsonrpc string            `json:"jsonrpc"`
-	ID      interface{}       `json:"id,omitempty"`
+	ID      any               `json:"id,omitempty"`
 	Method  string            `json:"method"`
 	Params  jsontext.Value    `json:"params"`
 	Meta    map[string]string `json:"meta,omitempty"`
@@ -152,7 +152,7 @@ func makeHandler(sc ServerConfig) *handler {
 
 // Register
 
-func (s *handler) register(namespace string, r interface{}) {
+func (s *handler) register(namespace string, r any) {
 	val := reflect.ValueOf(r)
 	// TODO: expect ptr
 
@@ -199,7 +199,7 @@ func (s *handler) register(namespace string, r interface{}) {
 // Handle
 
 type rpcErrFunc = func(w func(func(io.Writer)), req *request, code ErrorCode, err error)
-type chanOut = func(reflect.Value, interface{}) error
+type chanOut = func(reflect.Value, any) error
 
 func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rpcError rpcErrFunc) {
 	wf := func(cb func(io.Writer)) {
@@ -443,7 +443,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	}
 
 	var kind reflect.Kind
-	var res interface{}
+	var res any
 	var nonZero bool
 	if handler.valOut != -1 {
 		res = callResult[handler.valOut].Interface()

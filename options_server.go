@@ -122,7 +122,7 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 
 			calls := new(RP)
 
-			err := cl.provide([]interface{}{
+			err := cl.provide([]any{
 				calls,
 			})
 			if err != nil {

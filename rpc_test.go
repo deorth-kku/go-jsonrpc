@@ -164,7 +164,7 @@ func TestReconnection(t *testing.T) {
 	// record the number of connection attempts during this test
 	connectionAttempts := int64(1)
 
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "SimpleServerHandler", []interface{}{&rpcClient}, nil, func(c *Config) {
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "SimpleServerHandler", []any{&rpcClient}, nil, func(c *Config) {
 		c.proxyConnFactory = func(f func() (*websocket.Conn, error)) func() (*websocket.Conn, error) {
 			return func() (*websocket.Conn, error) {
 				defer func() {
@@ -912,7 +912,7 @@ func TestServerChanLockClose(t *testing.T) {
 
 	_, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(),
 		"ChanHandler",
-		[]interface{}{&client}, nil,
+		[]any{&client}, nil,
 		func(c *Config) {
 			c.proxyConnFactory = func(f func() (*websocket.Conn, error)) func() (*websocket.Conn, error) {
 				return func() (*websocket.Conn, error) {
@@ -1111,7 +1111,7 @@ func TestInterfaceHandler(t *testing.T) {
 	testServ := httptest.NewServer(rpcServer)
 	defer testServ.Close()
 
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "InterfaceHandler", []interface{}{&client}, nil, WithParamMarshaler(readerEnc))
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "InterfaceHandler", []any{&client}, nil, WithParamMarshaler(readerEnc))
 	require.NoError(t, err)
 
 	defer closer()
@@ -1216,7 +1216,7 @@ func TestUserError(t *testing.T) {
 		TestP  func() error
 		TestMy func(s string) error
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "ErrHandler", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "ErrHandler", []any{
 		&client,
 	}, nil, WithErrors(errs))
 	require.NoError(t, err)
@@ -1239,7 +1239,7 @@ func TestUserError(t *testing.T) {
 func TestIDHandling(t *testing.T) {
 	cases := []struct {
 		str       string
-		expect    interface{}
+		expect    any
 		expectErr bool
 	}{
 		{
@@ -1283,7 +1283,7 @@ func TestAliasedCall(t *testing.T) {
 	var client struct {
 		WhateverMethodName func(int) (int, error) `rpc_method:"ServName.AddGet"`
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
 	}, nil)
 	require.NoError(t, err)
@@ -1326,7 +1326,7 @@ func TestNotif(t *testing.T) {
 			var client struct {
 				Notif func() error `notify:"true"`
 			}
-			closer, err := NewMergeClient(context.Background(), proto+"://"+testServ.Listener.Addr().String(), "Notif", []interface{}{
+			closer, err := NewMergeClient(context.Background(), proto+"://"+testServ.Listener.Addr().String(), "Notif", []any{
 				&client,
 			}, nil)
 			require.NoError(t, err)
@@ -1376,7 +1376,7 @@ func TestCallWithRawParams(t *testing.T) {
 	var client struct {
 		Call func(ctx context.Context, ps RawParams) (int, error)
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Raw", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Raw", []any{
 		&client,
 	}, nil)
 	require.NoError(t, err)
@@ -1438,7 +1438,7 @@ func TestReverseCall(t *testing.T) {
 	var client struct {
 		Call func() error
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
 	}, nil, WithClientHandler("Client", &RevCallTestClientHandler{}))
 	require.NoError(t, err)
@@ -1491,7 +1491,7 @@ func TestReverseCallAliased(t *testing.T) {
 	var client struct {
 		Call func() error
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
 	}, nil, WithClientHandler("Client", &RevCallTestClientHandler{}), WithClientHandlerAlias("rpc_thing", "Client.CallOnClient"))
 	require.NoError(t, err)
@@ -1544,7 +1544,7 @@ func TestReverseCallDroppedConn(t *testing.T) {
 	var client struct {
 		Call func() error
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
 	}, nil, WithClientHandler("Client", &RevCallTestClientHandler{}))
 	require.NoError(t, err)
@@ -1693,7 +1693,7 @@ func TestNewCustomClient(t *testing.T) {
 	}
 
 	// Create custom client
-	closer, err := NewCustomClient("SimpleServerHandler", []interface{}{&client}, doRequest)
+	closer, err := NewCustomClient("SimpleServerHandler", []any{&client}, doRequest)
 	require.NoError(t, err)
 	defer closer()
 
@@ -1725,7 +1725,7 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 	var client struct {
 		Call func(ctx context.Context, ps RawParams) error `rpc_method:"Server_Call"`
 	}
-	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []interface{}{
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Server", []any{
 		&client,
 	}, nil)
 	require.NoError(t, err)

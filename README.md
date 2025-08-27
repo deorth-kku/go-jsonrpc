@@ -161,7 +161,7 @@ var client struct {
 }
 
 // Create custom client
-closer, err := jsonrpc.NewCustomClient("SimpleServerHandler", []interface{}{&client}, doRequest)
+closer, err := jsonrpc.NewCustomClient("SimpleServerHandler", []any{&client}, doRequest)
 if err != nil {
     log.Fatalf("Failed to create client: %v", err)
 }
@@ -230,7 +230,7 @@ var client struct {
     Call func() error
 }
 
-closer, err := jsonrpc.NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "ServerHandler", []interface{}{
+closer, err := jsonrpc.NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "ServerHandler", []any{
     &client,
 }, nil, jsonrpc.WithClientHandler("Client", &RevCallTestClientHandler{}))
 if err != nil {
