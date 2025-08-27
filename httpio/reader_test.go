@@ -39,11 +39,9 @@ func TestReaderProxy(t *testing.T) {
 	rd := ReaderResultDecoder(full_url)
 	pe := ReaderParamEncoder(full_url)
 
-	const potatos = "pooooootato"
-
 	for name, url := range map[string]string{
 		"http": full_url, // since http uses POST and ws uses GET, we need to test both to make sure [MuxRPCServerWithReader] works as intended
-		"ws":   "ws://" + testServ.Listener.Addr().String() + "/rpc/v0",
+		"ws":   "ws://" + testServ.Listener.Addr().String() + "/rpc",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var client struct {
@@ -53,6 +51,8 @@ func TestReaderProxy(t *testing.T) {
 			closer, err := jsonrpc.NewMergeClient(context.Background(), url, "ReaderHandler", []interface{}{&client}, nil, pe, rd)
 			require.NoError(t, err)
 			defer closer()
+
+			const potatos = "pooooootato"
 
 			read, err := client.ReadAll(context.TODO(), strings.NewReader(potatos))
 			require.NoError(t, err)
