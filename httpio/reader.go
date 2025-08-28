@@ -107,7 +107,6 @@ func ReaderResultDecoder(addr string) jsonrpc.Option {
 				return err
 			}
 			req, cancel := newRequest(u, http.MethodGet, nil, timeout)
-			defer cancel()
 			resp, err := client.Do(req)
 			if err != nil {
 				return err
@@ -121,10 +120,18 @@ func ReaderResultDecoder(addr string) jsonrpc.Option {
 					return fmt.Errorf("error when getting reader, status %d, uuid: %s, msg: %s", resp.StatusCode, reqID, str)
 				}
 			}
-			*rd = &waitReadCloser{
+			wrc := &waitReadCloser{
 				ReadCloser: resp.Body,
 				wait:       make(chan struct{}),
 			}
+			*rd = wrc
+			go func() {
+				select {
+				case <-wrc.wait:
+				case <-req.Context().Done():
+				}
+				cancel()
+			}()
 			return nil
 		})(c)
 	}
