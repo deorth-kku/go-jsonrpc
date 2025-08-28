@@ -120,18 +120,9 @@ func ReaderResultDecoder(addr string) jsonrpc.Option {
 					return fmt.Errorf("error when getting reader, status %d, uuid: %s, msg: %s", resp.StatusCode, reqID, str)
 				}
 			}
-			wrc := &waitReadCloser{
-				ReadCloser: resp.Body,
-				wait:       make(chan struct{}),
-			}
+			ctx, wrc := newWaitReader(req.Context(), resp.Body)
 			*rd = wrc
-			go func() {
-				select {
-				case <-wrc.wait:
-				case <-req.Context().Done():
-				}
-				cancel()
-			}()
+			context.AfterFunc(ctx, cancel)
 			return nil
 		})(c)
 	}
@@ -148,20 +139,29 @@ func readString(rd io.Reader) (string, error) {
 
 type waitReadCloser struct {
 	io.ReadCloser
-	wait chan struct{}
+	cancal context.CancelCauseFunc
+}
+
+func newWaitReader(ctx context.Context, reader io.ReadCloser) (context.Context, *waitReadCloser) {
+	wrc := &waitReadCloser{
+		ReadCloser: reader,
+	}
+	ctx, wrc.cancal = context.WithCancelCause(ctx)
+	return ctx, wrc
 }
 
 func (w *waitReadCloser) Read(p []byte) (int, error) {
 	n, err := w.ReadCloser.Read(p)
 	if err != nil {
-		close(w.wait)
+		w.cancal(err)
 	}
 	return n, err
 }
 
 func (w *waitReadCloser) Close() error {
-	close(w.wait)
-	return w.ReadCloser.Close()
+	err := w.ReadCloser.Close()
+	w.cancal(err)
+	return err
 }
 
 const (
@@ -189,13 +189,10 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 		ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
 		logger.Debug("reader handler get channel", "uuid", u, "ch", ch)
 
-		wr := &waitReadCloser{
-			ReadCloser: req.Body,
-			wait:       make(chan struct{}),
-		}
+		ctx, wrc := newWaitReader(req.Context(), req.Body)
 
 		select {
-		case ch <- wr:
+		case ch <- wrc:
 		case <-req.Context().Done():
 			logger.Error("context error in reader stream handler (1)", "err", req.Context().Err())
 			resp.WriteHeader(http.StatusInternalServerError)
@@ -203,7 +200,7 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 		}
 
 		select {
-		case <-wr.wait:
+		case <-ctx.Done():
 		case <-req.Context().Done():
 			logger.Error("context error in reader stream handler (2)", "err", req.Context().Err())
 			resp.WriteHeader(http.StatusInternalServerError)
