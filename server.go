@@ -35,7 +35,9 @@ const (
 	ConnectionTypeWS ConnectionType = "websockets"
 )
 
-var connectionTypeCtxKey = &struct{ name string }{"jsonrpc-connection-type"}
+type connectionTypeKey struct{}
+
+var connectionTypeCtxKey = connectionTypeKey{}
 
 // GetConnectionType returns the connection type of the request if it was set by an RPCServer.
 // A connection type of ConnectionTypeUnknown means that the connection type was not set.

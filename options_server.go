@@ -12,8 +12,6 @@ import (
 // note: we embed reflect.Type because proxy-structs are not comparable
 type jsonrpcReverseClient struct{ reflect.Type }
 
-type ParamDecoder func(ctx context.Context, json []byte) (reflect.Value, error)
-
 type ServerConfig struct {
 	maxRequestSize int64
 	pingInterval   time.Duration
