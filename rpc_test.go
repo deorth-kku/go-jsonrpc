@@ -1792,3 +1792,12 @@ func TestNilRoundTrip(t *testing.T) {
 	require.NoError(t, client.CheckSliceNil(nil, true))
 	require.NoError(t, client.CheckSliceNil(make([]struct{}, 0), false))
 }
+
+func TestContext(t *testing.T) {
+	ctx := context.WithValue(context.Background(), nilcheckerserver{}, "test")
+	opt := WithContext(jsonDefault(), ctx)
+
+	extracted := ContextFrom(opt)
+
+	require.Equal(t, ctx, extracted, "extracted context is not the original one")
+}

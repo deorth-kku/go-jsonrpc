@@ -217,8 +217,13 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 
 			ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
 			logger.Debug("reader unmarshal get channel", "uuid", u, "ch", ch)
-			*rd = <-ch
-			return nil
+			ctx := jsonrpc.ContextFrom(dec.Options())
+			select {
+			case *rd = <-ch:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		})(c)
 	}
 	return hnd, dec

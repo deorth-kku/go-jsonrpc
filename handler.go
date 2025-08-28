@@ -387,7 +387,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 		// When hasObjectParams is true, there is only one parameter and it is a [Object].
 		// this is my way to do named params in Golang
 		rp := reflect.New(handler.paramReceivers[0])
-		if err := json.Unmarshal(req.Params, rp.Interface(), s.jsonOptions); err != nil {
+		if err := json.Unmarshal(req.Params, rp.Interface(), WithContext(s.jsonOptions, ctx)); err != nil {
 			rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 			return
@@ -397,7 +397,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 		// "normal" array param list
 		var ps []param
 		if len(req.Params) > 0 {
-			err := json.Unmarshal(req.Params, &ps, s.jsonOptions)
+			err := json.Unmarshal(req.Params, &ps, WithContext(s.jsonOptions, ctx))
 			if err != nil {
 				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling param array: %w", err))
 				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
@@ -415,7 +415,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 
 		for i := range handler.nParams {
 			rp := reflect.New(handler.paramReceivers[i])
-			if err := json.Unmarshal(ps[i].data, rp.Interface(), s.jsonOptions); err != nil {
+			if err := json.Unmarshal(ps[i].data, rp.Interface(), WithContext(s.jsonOptions, ctx)); err != nil {
 				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
 				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
 				return

@@ -241,3 +241,34 @@ func WithMethodNameFormatter(namer MethodNameFormatter) func(c *Config) {
 		c.methodNamer = namer
 	}
 }
+
+type optionsStore[T any] struct {
+	value T
+}
+
+func OptionsStore[T any](opts json.Options, value T) json.Options {
+	updateUnmarshalers(&opts, func(e *jsontext.Decoder, cs *optionsStore[T]) error {
+		*cs = optionsStore[T]{value}
+		return e.SkipValue()
+	})
+	return opts
+}
+
+func OptionsLoad[T any](opts json.Options) (T, bool) {
+	var store optionsStore[T]
+	err := json.Unmarshal([]byte("{}"), &store, opts)
+	return store.value, err == nil
+}
+
+// this is sort of black magic, but it allows us to pass context in json unmarshaling
+func WithContext(opts json.Options, ctx context.Context) json.Options {
+	return OptionsStore(opts, ctx)
+}
+
+func ContextFrom(opts json.Options) context.Context {
+	ctx, ok := OptionsLoad[context.Context](opts)
+	if !ok {
+		return context.Background()
+	}
+	return ctx
+}
