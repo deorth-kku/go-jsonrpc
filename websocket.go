@@ -32,8 +32,8 @@ type frame struct {
 	Meta    map[string]string `json:"meta,omitzero"`
 
 	// request
-	Method string         `json:"method,omitzero"`
-	Params jsontext.Value `json:"params,omitzero"`
+	Method string `json:"method,omitzero"`
+	Params params `json:"params,omitzero"`
 
 	// response
 	Result resultValue   `json:"result,omitzero"`
@@ -61,6 +61,7 @@ type outChanReg struct {
 
 type requestHandler interface {
 	handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut)
+	getMethodHandler(name string) (methodHandler, bool)
 	GetLogger() *slog.Logger
 	GetJsonOptions() json.Options
 }
@@ -199,10 +200,13 @@ func (c *wsConn) sendRequest(req request) error {
 		c.getlogger().Debug("sendRequest", "req", req.Method, "id", req.ID)
 	}
 
-	if err := c.conn.WriteJSON(req); err != nil {
+	wt, err := c.conn.NextWriter(websocket.TextMessage)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer wt.Close()
+	enc := jsontext.NewEncoder(wt, c.jsonOptions())
+	return json.MarshalEncode(enc, req, c.jsonOptions())
 }
 
 //                 //
@@ -289,13 +293,11 @@ func (c *wsConn) handleOutChans() {
 			cases = cases[:n]
 			caseToID = caseToID[:n-internal]
 
-			rp := common.Must(json.Marshal([]uint64{id}, c.jsonOptions()))
-
 			if err := c.sendRequest(request{
 				Jsonrpc: "2.0",
 				ID:      nil, // notification
 				Method:  chClose,
-				Params:  rp,
+				Params:  getParam(id),
 			}); err != nil {
 				c.getlogger().Warn("closed out channel sendRequest failed", "err", err)
 			}
@@ -303,17 +305,14 @@ func (c *wsConn) handleOutChans() {
 		}
 
 		// forward message
-		rp, err := json.Marshal([]any{caseToID[chosen-internal], val.Interface()}, c.jsonOptions())
-		if err != nil {
-			c.getlogger().Error("marshaling params for sendRequest failed", "err", err)
-			continue
-		}
-
 		if err := c.sendRequest(request{
 			Jsonrpc: "2.0",
 			ID:      nil, // notification
 			Method:  chValue,
-			Params:  rp,
+			Params: params{values: []reflect.Value{
+				reflect.ValueOf(caseToID[chosen-internal]),
+				val,
+			}},
 		}); err != nil {
 			c.getlogger().Warn("sendRequest failed", "err", err)
 			return
@@ -354,17 +353,10 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req any) error {
 //	contexts correctly (cancelling when async functions are no longer is use)
 func (c *wsConn) handleCtxAsync(actx context.Context, id any) {
 	<-actx.Done()
-
-	rp, err := json.Marshal([]any{id}, c.jsonOptions())
-	if err != nil {
-		c.getlogger().Error("marshaling params for sendRequest failed", "err", err)
-		return
-	}
-
 	if err := c.sendRequest(request{
 		Jsonrpc: "2.0",
 		Method:  wsCancel,
-		Params:  rp,
+		Params:  getParam(id),
 	}); err != nil {
 		c.getlogger().Warn("failed to send request", "method", wsCancel, "id", id, "error", err.Error())
 	}
@@ -376,8 +368,12 @@ func (c *wsConn) cancelCtx(req frame) {
 		c.getlogger().Warn(wsCancel + " call with ID set, won't respond")
 	}
 
+	dd, ok := req.Params.getdeferredData()
+	if !ok {
+		panic("cannot get deferred data")
+	}
 	var params []any
-	if err := json.Unmarshal(req.Params, &params, c.jsonOptions()); err != nil {
+	if err := json.Unmarshal(dd.data, &params, dd.opt); err != nil {
 		c.getlogger().Error("failed to unmarshal channel", "method", wsCancel, "error", err.Error())
 		return
 	}
@@ -399,8 +395,12 @@ func (c *wsConn) cancelCtx(req frame) {
 //                     //
 
 func (c *wsConn) handleChanMessage(frame frame) {
-	var params []param
-	if err := json.Unmarshal(frame.Params, &params, c.jsonOptions()); err != nil {
+	dd, ok := frame.Params.getdeferredData()
+	if !ok {
+		panic("cannot get deferred data")
+	}
+	var params []jsontext.Value
+	if err := json.Unmarshal(dd.data, &params, dd.opt); err != nil {
 		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
@@ -411,7 +411,7 @@ func (c *wsConn) handleChanMessage(frame frame) {
 	}
 
 	var chid uint64
-	if err := json.Unmarshal(params[0].data, &chid, c.jsonOptions()); err != nil {
+	if err := json.Unmarshal(params[0], &chid, dd.opt); err != nil {
 		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
@@ -425,12 +425,16 @@ func (c *wsConn) handleChanMessage(frame frame) {
 	hnd.lk.Lock()
 	defer hnd.lk.Unlock()
 
-	hnd.cb(params[1].data, true)
+	hnd.cb(params[1], true)
 }
 
 func (c *wsConn) handleChanClose(frame frame) {
-	var params []param
-	if err := json.Unmarshal(frame.Params, &params, c.jsonOptions()); err != nil {
+	dd, ok := frame.Params.getdeferredData()
+	if !ok {
+		panic("cannot get deferred data")
+	}
+	var params []jsontext.Value
+	if err := json.Unmarshal(dd.data, &params, dd.opt); err != nil {
 		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
@@ -439,7 +443,7 @@ func (c *wsConn) handleChanClose(frame frame) {
 	}
 
 	var chid uint64
-	if err := json.Unmarshal(params[0].data, &chid, c.jsonOptions()); err != nil {
+	if err := json.Unmarshal(params[0], &chid, dd.opt); err != nil {
 		c.getlogger().Error("failed to unmarshal channel id in xrpc.ch.val", "reqID", frame.ID, "err", err)
 		return
 	}
@@ -685,7 +689,7 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 		return req.respType
 	}
 	// use a autoResetReader in case the read takes a long time
-	if err := json.UnmarshalRead(c.autoResetReader(r), &frame, c.jsonOptions()); err != nil {
+	if err := json.UnmarshalRead(c.autoResetReader(r), &frame, WithContext(c.jsonOptions(), ctx)); err != nil {
 		c.getlogger().Warn("failed to unmarshal frame", "error", err)
 		if frame.ID != nil {
 			frame.Error = &JSONRPCError{

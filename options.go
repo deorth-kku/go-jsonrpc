@@ -54,6 +54,11 @@ func (c *Config) handle(context.Context, request, func(func(io.Writer)), rpcErrF
 	c.logger.Error("handleCall on client with no reverse handler")
 }
 
+func (c *Config) getMethodHandler(name string) (methodHandler, bool) {
+	c.logger.Debug("getMethodHandler on client with no reverse handler")
+	return methodHandler{}, false
+}
+
 func (c *Config) GetTimeout() time.Duration {
 	return c.timeout
 }
@@ -246,10 +251,13 @@ type optionsStore[T any] struct {
 	value T
 }
 
+const isStored = paramError("stored")
+
 func OptionsStore[T any](opts json.Options, value T) json.Options {
 	updateUnmarshalers(&opts, func(e *jsontext.Decoder, cs *optionsStore[T]) error {
 		*cs = optionsStore[T]{value}
-		return e.SkipValue()
+		e.SkipValue()
+		return isStored
 	})
 	return opts
 }
@@ -257,10 +265,10 @@ func OptionsStore[T any](opts json.Options, value T) json.Options {
 func OptionsLoad[T any](opts json.Options) (T, bool) {
 	var store optionsStore[T]
 	err := json.Unmarshal([]byte("{}"), &store, opts)
-	return store.value, err == nil
+	return store.value, err == isStored
 }
 
-// this is sort of black magic, but it allows us to pass context in json unmarshaling
+// this is sort of black magic, but it allows us to pass context into json unmarshaling
 func WithContext(opts json.Options, ctx context.Context) json.Options {
 	return OptionsStore(opts, ctx)
 }

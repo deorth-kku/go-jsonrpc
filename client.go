@@ -421,17 +421,11 @@ func (c *client) setupRequestChan() chan clientRequest {
 				break loop
 			case <-ctxDone: // send cancel request
 				ctxDone = nil
-
-				rp, err := json.Marshal([]any{cr.req.ID}, c.jsonOption)
-				if err != nil {
-					return clientResponse{}, fmt.Errorf("marshalling cancel request: %w", err)
-				}
-
 				cancelReq := clientRequest{
 					req: request{
 						Jsonrpc: "2.0",
 						Method:  wsCancel,
-						Params:  rp,
+						Params:  getParam(cr.req.ID),
 					},
 					ready: make(chan clientResponse, 1),
 				}
@@ -650,31 +644,10 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		// converted to 3.0.
 	}
 
-	var serializedParams jsontext.Value
-
-	if fn.hasObjectParams {
-		var err error
-		serializedParams, err = json.Marshal(args[fn.hasCtx].Interface(), fn.client.jsonOption)
-		if err != nil {
-			return fn.processError(fmt.Errorf("marshaling object params failed: %w", err))
-		}
-	} else {
-		params := make([]param, len(args)-fn.hasCtx)
-		for i, arg := range args[fn.hasCtx:] {
-			params[i] = param{
-				v: arg,
-			}
-		}
-		var err error
-		serializedParams, err = json.Marshal(params, fn.client.jsonOption)
-		if err != nil {
-			return fn.processError(fmt.Errorf("marshaling params failed: %w", err))
-		}
-	}
-
 	ctx := context.Background()
 	if fn.hasCtx == 1 {
 		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
+		args = args[1:]
 	}
 
 	retVal := func() reflect.Value { return reflect.Value{} }
@@ -690,7 +663,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		Jsonrpc: "2.0",
 		ID:      id,
 		Method:  fn.name,
-		Params:  serializedParams,
+		Params:  params{values: args},
 	}
 
 	b := backoff{

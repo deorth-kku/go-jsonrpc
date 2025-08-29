@@ -134,12 +134,12 @@ func TestRawRequests(t *testing.T) {
 	t.Run("inc-noparam", tc(`{"jsonrpc": "2.0", "method": "SimpleServerHandler.Inc", "id": 2}`, `{"jsonrpc":"2.0","id":2,"result":null}`, 1, 200))
 	t.Run("add", tc(`{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [10], "id": 4}`, `{"jsonrpc":"2.0","id":4,"result":null}`, 10, 200))
 	// Batch requests
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 5}`, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}`, 0, 500))
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 6}]`, `[{"jsonrpc":"2.0","id":6,"result":null}]`, 123, 200))
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 7},{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-122], "id": 8}]`, `[{"jsonrpc":"2.0","id":7,"result":null},{"jsonrpc":"2.0","id":8,"result":null}]`, 1, 200))
-	t.Run("add", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 9},{"jsonrpc": "2.0", "params": [-122], "id": 10}]`, `[{"jsonrpc":"2.0","id":9,"result":null},{"jsonrpc":"2.0","id":10,"error":{"code":-32601,"message":"method '' not found"}}]`, 123, 200))
-	t.Run("add", tc(`     [{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-1], "id": 11}]   `, `[{"jsonrpc":"2.0","id":11,"result":null}]`, -1, 200))
-	t.Run("add", tc(``, `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"invalid request"}}`, 0, 400))
+	t.Run("bad_end", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 5}`, `[{"jsonrpc":"2.0","id":5,"result":null},{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"unexpected end of JSON input"}}]`, 123, 200))
+	t.Run("batch1", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 6}]`, `[{"jsonrpc":"2.0","id":6,"result":null}]`, 123, 200))
+	t.Run("batch2", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 7},{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-122], "id": 8}]`, `[{"jsonrpc":"2.0","id":7,"result":null},{"jsonrpc":"2.0","id":8,"result":null}]`, 1, 200))
+	t.Run("batch2err", tc(`[{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [123], "id": 9},{"jsonrpc": "2.0", "params": [-122], "id": 10}]`, `[{"jsonrpc":"2.0","id":9,"result":null},{"jsonrpc":"2.0","id":10,"error":{"code":-32601,"message":"method '' not found"}}]`, 123, 200))
+	t.Run("batch_with_space", tc(`     [{"jsonrpc": "2.0", "method": "SimpleServerHandler.Add", "params": [-1], "id": 11}]   `, `[{"jsonrpc":"2.0","id":11,"result":null}]`, -1, 200))
+	t.Run("empty", tc(``, `{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"EOF"}}`, 0, 500))
 }
 
 func TestReconnection(t *testing.T) {
@@ -320,7 +320,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = erronly.AddGet()
-	if err == nil || err.Error() != "RPC error (-32602): wrong param count (method 'SimpleServerHandler.AddGet'): 0 != 1" {
+	if err == nil || err.Error() != "RPC error (-32602): not enough params" {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -332,7 +332,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into int.0 of Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -431,7 +431,7 @@ func TestRPCHttpClient(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = erronly.AddGet()
-	if err == nil || err.Error() != "RPC error (-32602): wrong param count (method 'SimpleServerHandler.AddGet'): 0 != 1" {
+	if err == nil || err.Error() != "RPC error (-32602): not enough params" {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -443,7 +443,7 @@ func TestRPCHttpClient(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into Go type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into int.params.0 of Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()

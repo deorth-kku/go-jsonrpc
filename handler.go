@@ -1,7 +1,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -11,6 +10,8 @@ import (
 	"log/slog"
 	"reflect"
 	"runtime"
+
+	"github.com/deorth-kku/go-common"
 )
 
 // Object is my solution for named params in golang.
@@ -59,7 +60,7 @@ type request struct {
 	Jsonrpc string            `json:"jsonrpc"`
 	ID      any               `json:"id,omitempty"`
 	Method  string            `json:"method"`
-	Params  jsontext.Value    `json:"params"`
+	Params  params            `json:"params"`
 	Meta    map[string]string `json:"meta,omitempty"`
 }
 
@@ -216,79 +217,50 @@ func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rp
 	wf := func(cb func(io.Writer)) {
 		cb(w)
 	}
+	// r = io.TeeReader(r, os.Stderr)
 
-	// We read the entire request upfront in a buffer to be able to tell if the
-	// client sent more than maxRequestSize and report it back as an explicit error,
-	// instead of just silently truncating it and reporting a more vague parsing
-	// error.
-	bufferedRequest := new(bytes.Buffer)
-	// We use LimitReader to enforce maxRequestSize. Since it won't return an
-	// EOF we can't actually know if the client sent more than the maximum or
-	// not, so we read one byte more over the limit to explicitly query that.
-	// FIXME: Maybe there's a cleaner way to do this.
-	reqSize, err := bufferedRequest.ReadFrom(io.LimitReader(r, s.maxRequestSize+1))
-	if err != nil {
-		// ReadFrom will discard EOF so any error here is unexpected and should
-		// be reported.
-		err = fmt.Errorf("reading request: %w", err)
-		rpcError(wf, nil, rpcParseError, err)
-		safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
-		return
-	}
-	if reqSize > s.maxRequestSize {
-		err = fmt.Errorf("request bigger than maximum %d allowed", s.maxRequestSize)
-		rpcError(wf, nil, rpcParseError, err)
-		// rpcParseError is the closest we have from the standard errors defined
-		// in [jsonrpc spec](https://www.jsonrpc.org/specification#error_object)
-		// to report the maximum limit.
-		safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
-		return
-	}
-
-	// Trim spaces to avoid issues with batch request detection.
-	bufferedRequest = bytes.NewBuffer(bytes.TrimSpace(bufferedRequest.Bytes()))
-	reqSize = int64(bufferedRequest.Len())
-
-	if reqSize == 0 {
-		err = errors.New("invalid request")
-		rpcError(wf, nil, rpcInvalidRequest, err)
-		safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
-		return
-	}
-
-	if bufferedRequest.Bytes()[0] == '[' && bufferedRequest.Bytes()[reqSize-1] == ']' {
-		var reqs []request
-
-		if err := json.UnmarshalRead(bufferedRequest, &reqs, s.jsonOptions); err != nil {
-			rpcError(wf, nil, rpcParseError, errors.New("parse error"))
-			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
-			return
-		}
-
-		if len(reqs) == 0 {
-			err = errors.New("invalid request")
-			rpcError(wf, nil, rpcInvalidRequest, err)
-			safecall2(s.tracer.OnInvalidRequest, bufferedRequest.Bytes(), err)
-			return
-		}
-
-		_, _ = w.Write([]byte("[")) // todo consider handling this error
-		for idx, req := range reqs {
-			s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
-
-			if idx != len(reqs)-1 {
-				_, _ = w.Write([]byte(",")) // todo consider handling this error
+	dec := jsontext.NewDecoder(LimitReader(r, s.maxRequestSize), WithContext(s.jsonOptions, ctx))
+	do1req := func() bool {
+		var req request
+		req.Params.getMethodHandler = func() (methodHandler, bool) { return s.getMethodHandler(req.Method) }
+		err := json.UnmarshalDecode(dec, &req)
+		if err != nil {
+			var perr paramError
+			if errors.As(err, &perr) {
+				rpcError(wf, &req, rpcInvalidParams, perr)
+				// since we are using stream reading, we no longer have the full bytes represent of the params
+				// use dec.UnreadBuffer as it may help the Tracer to decide what to do
+				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, dec.UnreadBuffer(), req.Meta, error(perr))
+				return true
+			} else {
+				rpcError(wf, &req, rpcParseError, err)
+				// same reason as above
+				safecall2(s.tracer.OnParseError, dec.UnreadBuffer(), err)
+				return true
 			}
 		}
-		_, _ = w.Write([]byte("]")) // todo consider handling this error
-	} else {
-		var req request
-		if err := json.UnmarshalRead(bufferedRequest, &req, s.jsonOptions); err != nil {
-			rpcError(wf, &req, rpcParseError, errors.New("parse error"))
-			safecall2(s.tracer.OnParseError, bufferedRequest.Bytes(), err)
-			return
-		}
 		s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
+		return false
+
+	}
+	if dec.PeekKind() == '[' {
+		dec.ReadToken()
+		w.Write([]byte{'['})
+		defer w.Write([]byte{']'})
+		first := true
+		for dec.PeekKind() != ']' {
+			if first {
+				first = false
+			} else {
+				w.Write([]byte{','})
+			}
+			if do1req() {
+				break
+			}
+		}
+		dec.ReadToken()
+	} else {
+		do1req()
 	}
 }
 
@@ -350,21 +322,39 @@ func (s *handler) createError(err error) *JSONRPCError {
 	return out
 }
 
-func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut) {
-	// Not sure if we need to sanitize the incoming req.Method or not.
-	handler, ok := s.methods[req.Method]
+func (s *handler) getMethodHandler(name string) (methodHandler, bool) {
+	handler, ok := s.methods[name]
 	if !ok {
-		aliasTo, ok := s.aliasedMethods[req.Method]
+		aliasTo, ok := s.aliasedMethods[name]
 		if ok {
 			handler, ok = s.methods[aliasTo]
+			return handler, ok
 		}
-		if !ok {
-			err := fmt.Errorf("method '%s' not found", req.Method)
-			rpcError(w, &req, rpcMethodNotFound, err)
-			safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-			done(false)
-			return
+	}
+	return handler, ok
+}
+
+func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut) {
+	// Not sure if we need to sanitize the incoming req.Method or not.
+	handler, ok := s.getMethodHandler(req.Method)
+	if !ok {
+		err := fmt.Errorf("method '%s' not found", req.Method)
+		rpcError(w, &req, rpcMethodNotFound, err)
+		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, common.Drop1(req.Params.getdeferredData()).data, req.Meta, err)
+		done(false)
+		return
+	}
+	data, err := req.Params.deferredUnmarshal(handler)
+	if err != nil {
+		var perr paramError
+		if errors.As(err, &perr) {
+			rpcError(w, &req, rpcInvalidParams, err)
+			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, data, req.Meta, err)
+		} else {
+			rpcError(w, &req, rpcParseError, err)
+			safecall2(s.tracer.OnParseError, data, err)
 		}
+		return
 	}
 
 	outCh := handler.valOut != -1 && handler.handlerFunc.Type().Out(handler.valOut).Kind() == reflect.Chan
@@ -373,56 +363,17 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 	if chOut == nil && outCh {
 		err := fmt.Errorf("method '%s' not supported in this mode (no out channel support)", req.Method)
 		rpcError(w, &req, rpcMethodNotFound, err)
-		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
+		// I could just marshal the params to get the bytes represent but that will cost us some performance
+		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, nil, req.Meta, err)
 		return
 	}
 
-	callParams := make([]reflect.Value, 1+handler.hasCtx+handler.nParams)
+	callParams := make([]reflect.Value, 1+handler.hasCtx)
 	callParams[0] = handler.receiver
 	if handler.hasCtx == 1 {
 		callParams[1] = reflect.ValueOf(ctx)
 	}
-
-	if handler.hasObjectParams {
-		// When hasObjectParams is true, there is only one parameter and it is a [Object].
-		// this is my way to do named params in Golang
-		rp := reflect.New(handler.paramReceivers[0])
-		if err := json.Unmarshal(req.Params, rp.Interface(), WithContext(s.jsonOptions, ctx)); err != nil {
-			rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
-			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-			return
-		}
-		callParams[1+handler.hasCtx] = rp.Elem()
-	} else {
-		// "normal" array param list
-		var ps []param
-		if len(req.Params) > 0 {
-			err := json.Unmarshal(req.Params, &ps, WithContext(s.jsonOptions, ctx))
-			if err != nil {
-				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling param array: %w", err))
-				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-				return
-			}
-		}
-
-		if len(ps) != handler.nParams {
-			err := fmt.Errorf("wrong param count (method '%s'): %d != %d", req.Method, len(ps), handler.nParams)
-			rpcError(w, &req, rpcInvalidParams, err)
-			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-			done(false)
-			return
-		}
-
-		for i := range handler.nParams {
-			rp := reflect.New(handler.paramReceivers[i])
-			if err := json.Unmarshal(ps[i].data, rp.Interface(), WithContext(s.jsonOptions, ctx)); err != nil {
-				rpcError(w, &req, rpcParseError, fmt.Errorf("unmarshaling params for '%s' (param: %T): %w", req.Method, rp.Interface(), err))
-				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, req.Params, req.Meta, err)
-				return
-			}
-			callParams[i+1+handler.hasCtx] = rp.Elem()
-		}
-	}
+	callParams = append(callParams, req.Params.values...)
 
 	// /////////////////
 
