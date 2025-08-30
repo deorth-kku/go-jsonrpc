@@ -1,7 +1,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"container/list"
 	"context"
 	"encoding/json/jsontext"
@@ -163,8 +162,8 @@ type ClientCloser func()
 // handler must be pointer to a struct with function fields
 // Returned value closes the client connection
 // TODO: Example
-func NewClient(ctx context.Context, addr string, namespace string, handler any, requestHeader http.Header) (ClientCloser, error) {
-	return NewMergeClient(ctx, addr, namespace, []any{handler}, requestHeader)
+func NewClient(ctx context.Context, addr string, namespace string, handler any, requestHeader http.Header, opts ...Option) (ClientCloser, error) {
+	return NewMergeClient(ctx, addr, namespace, []any{handler}, requestHeader, opts...)
 }
 
 type client struct {
@@ -268,12 +267,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 	}
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := json.Marshal(&cr.req, c.jsonOption)
-		if err != nil {
-			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
-		}
-
-		hreq, err := http.NewRequest("POST", addr, bytes.NewReader(b))
+		hreq, err := http.NewRequest("POST", addr, NewJsonReader(cr.req, WithContext(c.jsonOption, ctx)))
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}
 		}

@@ -210,3 +210,34 @@ func (l *LimitedReader) Read(p []byte) (n int, err error) {
 	l.N -= int64(n)
 	return
 }
+
+type JsonReader struct {
+	data    any
+	options json.Options
+	rd      *io.PipeReader
+}
+
+func NewJsonReader(data any, opts ...json.Options) *JsonReader {
+	return &JsonReader{
+		data:    data,
+		options: json.JoinOptions(opts...),
+	}
+}
+
+func (j *JsonReader) Read(b []byte) (int, error) {
+	if j.rd == nil {
+		var wt *io.PipeWriter
+		j.rd, wt = io.Pipe()
+		go func(wt io.WriteCloser) {
+			defer wt.Close()
+			j.WriteTo(wt)
+		}(wt)
+	}
+	return j.rd.Read(b)
+}
+
+func (j JsonReader) WriteTo(rd io.Writer) (int64, error) {
+	enc := jsontext.NewEncoder(rd, j.options)
+	err := json.MarshalEncode(enc, j.data, j.options)
+	return enc.OutputOffset(), err
+}

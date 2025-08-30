@@ -210,58 +210,53 @@ func (s *handler) register(namespace string, r any) {
 
 // Handle
 
-type rpcErrFunc = func(w func(func(io.Writer)), req *request, code ErrorCode, err error)
+type rpcErrFunc = func(w func(arg any) error, req *request, code ErrorCode, err error)
 type chanOut = func(reflect.Value, any) error
 
 func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rpcError rpcErrFunc) {
-	wf := func(cb func(io.Writer)) {
-		cb(w)
-	}
 	// r = io.TeeReader(r, os.Stderr)
-
-	dec := jsontext.NewDecoder(LimitReader(r, s.maxRequestSize), WithContext(s.jsonOptions, ctx))
-	do1req := func() bool {
-		var req request
-		req.Params.getMethodHandler = func() (methodHandler, bool) { return s.getMethodHandler(req.Method) }
-		err := json.UnmarshalDecode(dec, &req)
-		if err != nil {
-			var perr paramError
-			if errors.As(err, &perr) {
-				rpcError(wf, &req, rpcInvalidParams, perr)
-				// since we are using stream reading, we no longer have the full bytes represent of the params
-				// use dec.UnreadBuffer as it may help the Tracer to decide what to do
-				safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, dec.UnreadBuffer(), req.Meta, error(perr))
-				return true
-			} else {
-				rpcError(wf, &req, rpcParseError, err)
-				// same reason as above
-				safecall2(s.tracer.OnParseError, dec.UnreadBuffer(), err)
-				return true
-			}
-		}
-		s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
-		return false
-
+	jopts := WithContext(s.jsonOptions, ctx)
+	dec := jsontext.NewDecoder(LimitReader(r, s.maxRequestSize), jopts)
+	enc := jsontext.NewEncoder(w, jopts)
+	wf := func(arg any) error {
+		return json.MarshalEncode(enc, arg)
 	}
 	if dec.PeekKind() == '[' {
 		dec.ReadToken()
-		w.Write([]byte{'['})
-		defer w.Write([]byte{']'})
-		first := true
+		enc.WriteToken(jsontext.BeginArray)
+		defer enc.WriteToken(jsontext.EndArray)
 		for dec.PeekKind() != ']' {
-			if first {
-				first = false
-			} else {
-				w.Write([]byte{','})
-			}
-			if do1req() {
+			if s.do1req(ctx, dec, wf, rpcError) {
 				break
 			}
 		}
 		dec.ReadToken()
 	} else {
-		do1req()
+		s.do1req(ctx, dec, wf, rpcError)
 	}
+}
+
+func (s *handler) do1req(ctx context.Context, dec *jsontext.Decoder, wf func(any) error, rpcError rpcErrFunc) bool {
+	var req request
+	req.Params.getMethodHandler = func() (methodHandler, bool) { return s.getMethodHandler(req.Method) }
+	err := json.UnmarshalDecode(dec, &req)
+	if err != nil {
+		var perr paramError
+		if errors.As(err, &perr) {
+			rpcError(wf, &req, rpcInvalidParams, perr)
+			// since we are using stream reading, we no longer have the full bytes represent of the params
+			// use dec.UnreadBuffer as it may help the Tracer to decide what to do
+			safecall6(s.tracer.OnInvalidParams, req.Jsonrpc, req.ID, req.Method, dec.UnreadBuffer(), req.Meta, error(perr))
+			return true
+		} else {
+			rpcError(wf, &req, rpcParseError, err)
+			// same reason as above
+			safecall2(s.tracer.OnParseError, dec.UnreadBuffer(), err)
+			return true
+		}
+	}
+	s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
+	return false
 }
 
 type stackstring struct{}
@@ -334,7 +329,7 @@ func (s *handler) getMethodHandler(name string) (methodHandler, bool) {
 	return handler, ok
 }
 
-func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut) {
+func (s *handler) handle(ctx context.Context, req request, w func(any) error, rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut) {
 	// Not sure if we need to sanitize the incoming req.Method or not.
 	handler, ok := s.getMethodHandler(req.Method)
 	if !ok {
@@ -442,48 +437,9 @@ func (s *handler) handle(ctx context.Context, req request, w func(func(io.Writer
 		s.logger.Error("error and res returned", "request", req, "r.err", resp.Error, "res", res)
 	}
 
-	withLazyWriter(w, func(w io.Writer) {
-		if err := json.MarshalWrite(w, resp, s.jsonOptions); err != nil {
-			s.logger.Error("failed when writing resp", "err", err)
-			safecall4(s.tracer.OnResponseError, req.Method, callParams, callResult, err)
-			return
-		}
-	})
-}
-
-// withLazyWriter makes it possible to defer acquiring a writer until the first write.
-// This is useful because json.Encode needs to marshal the response fully before writing, which may be
-// a problem for very large responses.
-func withLazyWriter(withWriterFunc func(func(io.Writer)), cb func(io.Writer)) {
-	lw := &lazyWriter{
-		withWriterFunc: withWriterFunc,
-
-		done: make(chan struct{}),
+	if err = w(resp); err != nil {
+		s.logger.Error("failed when writing resp", "err", err)
+		safecall4(s.tracer.OnResponseError, req.Method, callParams, callResult, err)
+		return
 	}
-
-	defer close(lw.done)
-	cb(lw)
-}
-
-type lazyWriter struct {
-	withWriterFunc func(func(io.Writer))
-
-	w    io.Writer
-	done chan struct{}
-}
-
-func (lw *lazyWriter) Write(p []byte) (n int, err error) {
-	if lw.w == nil {
-		acquired := make(chan struct{})
-		go func() {
-			lw.withWriterFunc(func(w io.Writer) {
-				lw.w = w
-				close(acquired)
-				<-lw.done
-			})
-		}()
-		<-acquired
-	}
-
-	return lw.w.Write(p)
 }

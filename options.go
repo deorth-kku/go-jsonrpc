@@ -5,7 +5,6 @@ import (
 	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -50,7 +49,7 @@ func (c Config) getclient(namespace string) client {
 	}
 }
 
-func (c *Config) handle(context.Context, request, func(func(io.Writer)), rpcErrFunc, func(keepCtx bool), chanOut) {
+func (c *Config) handle(context.Context, request, func(any) error, rpcErrFunc, func(keepCtx bool), chanOut) {
 	c.logger.Error("handleCall on client with no reverse handler")
 }
 

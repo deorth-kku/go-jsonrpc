@@ -60,7 +60,7 @@ type outChanReg struct {
 }
 
 type requestHandler interface {
-	handle(ctx context.Context, req request, w func(func(io.Writer)), rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut)
+	handle(ctx context.Context, req request, w func(any) error, rpcError rpcErrFunc, done func(keepCtx bool), chOut chanOut)
 	getMethodHandler(name string) (methodHandler, bool)
 	GetLogger() *slog.Logger
 	GetJsonOptions() json.Options
@@ -172,32 +172,14 @@ func (c *wsConn) jsonOptions() json.Options {
 	return c.handler.GetJsonOptions()
 }
 
-// nextWriter waits for writeLk and invokes the cb callback with WS message
-// writer when the lock is acquired
-func (c *wsConn) nextWriter(cb func(io.Writer)) {
-	c.writeLk.Lock()
-	defer c.writeLk.Unlock()
-
-	wcl, err := c.conn.NextWriter(websocket.TextMessage)
-	if err != nil {
-		c.getlogger().Error("handle me", "err", err)
-		return
-	}
-
-	cb(wcl)
-
-	if err := wcl.Close(); err != nil {
-		c.getlogger().Error("handle me", "err", err)
-		return
-	}
-}
-
-func (c *wsConn) sendRequest(req request) error {
+func (c *wsConn) sendJSON(req any) error {
 	c.writeLk.Lock()
 	defer c.writeLk.Unlock()
 
 	if debugTrace {
-		c.getlogger().Debug("sendRequest", "req", req.Method, "id", req.ID)
+		if req, ok := req.(request); ok {
+			c.getlogger().Debug("sendRequest", "req", req.Method, "id", req.ID)
+		}
 	}
 
 	wt, err := c.conn.NextWriter(websocket.TextMessage)
@@ -251,20 +233,14 @@ func (c *wsConn) handleOutChans() {
 				Dir:  reflect.SelectRecv,
 				Chan: registration.ch,
 			})
-
-			c.nextWriter(func(w io.Writer) {
-				resp := &response{
-					Jsonrpc: "2.0",
-					ID:      registration.reqID,
-					Result:  registration.chID,
-				}
-
-				if err := json.MarshalWrite(w, resp, c.jsonOptions()); err != nil {
-					c.getlogger().Error("failed when writing resp", "err", err)
-					return
-				}
-			})
-
+			if err := c.sendJSON(response{
+				Jsonrpc: "2.0",
+				ID:      registration.reqID,
+				Result:  registration.chID,
+			}); err != nil {
+				c.getlogger().Error("failed when writing resp", "err", err)
+				return
+			}
 			continue
 		case 1: // exiting channel
 			if !ok {
@@ -293,7 +269,7 @@ func (c *wsConn) handleOutChans() {
 			cases = cases[:n]
 			caseToID = caseToID[:n-internal]
 
-			if err := c.sendRequest(request{
+			if err := c.sendJSON(request{
 				Jsonrpc: "2.0",
 				ID:      nil, // notification
 				Method:  chClose,
@@ -305,7 +281,7 @@ func (c *wsConn) handleOutChans() {
 		}
 
 		// forward message
-		if err := c.sendRequest(request{
+		if err := c.sendJSON(request{
 			Jsonrpc: "2.0",
 			ID:      nil, // notification
 			Method:  chValue,
@@ -353,7 +329,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req any) error {
 //	contexts correctly (cancelling when async functions are no longer is use)
 func (c *wsConn) handleCtxAsync(actx context.Context, id any) {
 	<-actx.Done()
-	if err := c.sendRequest(request{
+	if err := c.sendJSON(request{
 		Jsonrpc: "2.0",
 		Method:  wsCancel,
 		Params:  getParam(id),
@@ -512,8 +488,8 @@ func (c *wsConn) handleCall(ctx context.Context, frame frame) {
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	nextWriter := func(cb func(io.Writer)) {
-		cb(io.Discard)
+	nextWriter := func(any) error {
+		return nil
 	}
 	done := func(keepCtx bool) {
 		if !keepCtx {
@@ -521,7 +497,7 @@ func (c *wsConn) handleCall(ctx context.Context, frame frame) {
 		}
 	}
 	if frame.ID != nil {
-		nextWriter = c.nextWriter
+		nextWriter = c.sendJSON
 
 		c.handling.Store(frame.ID, cancel)
 
@@ -533,7 +509,7 @@ func (c *wsConn) handleCall(ctx context.Context, frame frame) {
 		}
 	}
 
-	go c.handler.handle(ctx, req, nextWriter, rpcError(c.getlogger(), c.jsonOptions()), done, c.handleChanOut)
+	go c.handler.handle(ctx, req, nextWriter, rpcError(c.getlogger(), nil), done, c.handleChanOut)
 }
 
 // handleFrame handles all incoming messages (calls and responses)
@@ -828,7 +804,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 				c.inflight.Store(req.req.ID, req)
 			}
 			c.writeLk.Unlock()
-			serr := c.sendRequest(req.req)
+			serr := c.sendJSON(req.req)
 			if serr != nil {
 				c.getlogger().Error("sendReqest failed (Handle me)", "err", serr)
 			}
