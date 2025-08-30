@@ -82,8 +82,7 @@ type wsConn struct {
 
 	// incoming messages
 	incoming    chan io.Reader
-	incomingErr error
-	errLk       sync.Mutex
+	incomingErr atomic.Pointer[error]
 
 	readError chan error
 
@@ -139,6 +138,22 @@ type chanHandler struct {
 	cb func(m []byte, ok bool)
 }
 
+func (c *wsConn) setIncomingErr(err error) {
+	if err == nil {
+		c.incomingErr.Store(nil)
+	} else {
+		c.incomingErr.Store(&err)
+	}
+}
+
+func (c *wsConn) getIncomingErr() error {
+	p := c.incomingErr.Load()
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 //                         //
 // WebSocket Message utils //
 //                         //
@@ -148,16 +163,12 @@ func (c *wsConn) nextMessage() {
 	c.resetReadDeadline()
 	msgType, r, err := c.conn.NextReader()
 	if err != nil {
-		c.errLk.Lock()
-		c.incomingErr = err
-		c.errLk.Unlock()
+		c.setIncomingErr(err)
 		close(c.incoming)
 		return
 	}
 	if msgType != websocket.BinaryMessage && msgType != websocket.TextMessage {
-		c.errLk.Lock()
-		c.incomingErr = errors.New("unsupported message type")
-		c.errLk.Unlock()
+		c.setIncomingErr(errors.New("unsupported message type"))
 		close(c.incoming)
 		return
 	}
@@ -638,14 +649,12 @@ func (c *wsConn) tryReconnect(ctx context.Context) bool {
 		}
 
 		c.writeLk.Lock()
+		defer c.writeLk.Unlock()
+
 		c.conn = conn
-		c.errLk.Lock()
-		c.incomingErr = nil
-		c.errLk.Unlock()
+		c.setIncomingErr(nil)
 
 		c.stopPings = c.setupPings()
-
-		c.writeLk.Unlock()
 
 		go c.nextMessage()
 	}()
@@ -753,9 +762,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 		select {
 		case r, ok := <-c.incoming:
 			action = "incoming"
-			c.errLk.Lock()
-			err := c.incomingErr
-			c.errLk.Unlock()
+			err := c.getIncomingErr()
 
 			if ok {
 				go c.readFrame(ctx, r)
@@ -786,10 +793,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 
 			c.writeLk.Lock()
 			if req.req.ID != nil { // non-notification
-				c.errLk.Lock()
-				hasErr := c.incomingErr != nil
-				c.errLk.Unlock()
-				if hasErr { // No conn?, immediate fail
+				if c.getIncomingErr() != nil { // No conn?, immediate fail
 					req.ready <- clientResponse{
 						Jsonrpc: "2.0",
 						ID:      req.req.ID,
