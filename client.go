@@ -441,7 +441,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 func (c *client) provide(outs []any) error {
 	for _, handler := range outs {
 		htyp := reflect.TypeOf(handler)
-		if htyp.Kind() != reflect.Ptr {
+		if htyp.Kind() != reflect.Pointer {
 			return errors.New("expected handler to be a pointer")
 		}
 		typ := htyp.Elem()

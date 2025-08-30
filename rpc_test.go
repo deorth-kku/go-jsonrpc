@@ -332,7 +332,7 @@ func TestRPC(t *testing.T) {
 	require.NoError(t, err)
 
 	err = wrongtype.Add("not an int")
-	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into int.0 of Go type int") {
+	if err == nil || !strings.Contains(err.Error(), "RPC error (-32700):") || !strings.Contains(err.Error(), "json: cannot unmarshal JSON string into int.params.0 of Go type int") {
 		t.Error("wrong error:", err)
 	}
 	closer()
@@ -667,7 +667,7 @@ func TestUnmarshalableResult(t *testing.T) {
 	defer closer()
 
 	_, err = client.GetUnUnmarshalableStuff()
-	require.EqualError(t, err, "RPC client error: unmarshaling frame: nope")
+	require.EqualError(t, err, "RPC error (-32700): nope")
 }
 
 type ChanHandler struct {

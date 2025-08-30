@@ -92,7 +92,7 @@ func (e *JSONRPCError) val(errors *Errors) reflect.Value {
 		t, ok := errors.byCode[e.Code]
 		if ok {
 			var v reflect.Value
-			if t.Kind() == reflect.Ptr {
+			if t.Kind() == reflect.Pointer {
 				v = reflect.New(t.Elem())
 			} else {
 				v = reflect.New(t)
@@ -110,7 +110,7 @@ func (e *JSONRPCError) val(errors *Errors) reflect.Value {
 				}
 			}
 
-			if t.Kind() != reflect.Ptr {
+			if t.Kind() != reflect.Pointer {
 				v = v.Elem()
 			}
 			return v
