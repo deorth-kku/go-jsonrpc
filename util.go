@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/rand"
 	"reflect"
+	"runtime"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -240,4 +243,33 @@ func (j JsonReader) WriteTo(rd io.Writer) (int64, error) {
 	enc := jsontext.NewEncoder(rd, j.options)
 	err := json.MarshalEncode(enc, j.data, j.options)
 	return enc.OutputOffset(), err
+}
+
+type stackstring struct{}
+
+func (stackstring) LogValue() slog.Value {
+	const bufsize = 4096
+	buf := make([]byte, bufsize)
+	l := runtime.Stack(buf, false)
+	buf = buf[:l]
+	return slog.StringValue(string(buf))
+}
+
+type teeValue struct {
+	str *strings.Builder
+	r   io.Reader
+}
+
+func (t teeValue) LogValue() slog.Value {
+	return slog.StringValue(t.str.String())
+}
+
+func (t teeValue) Reader() io.Reader {
+	return t.r
+}
+
+func NewTeeLogValue(r io.Reader) teeValue {
+	v := teeValue{str: new(strings.Builder)}
+	v.r = io.TeeReader(r, v.str)
+	return v
 }

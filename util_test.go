@@ -2,7 +2,11 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"log/slog"
+	"os"
 	"testing"
+
+	"github.com/deorth-kku/go-common"
 )
 
 func TestParams(t *testing.T) {
@@ -16,4 +20,11 @@ func TestParams(t *testing.T) {
 		t.Error(err)
 		return
 	}
+}
+
+var _ slog.LogValuer = stackstring{}
+
+func TestStack(t *testing.T) {
+	common.SetLogRaw(os.Stderr, slog.LevelDebug, common.TextFormat)
+	slog.Error("test stack", "test", 1, "stack", stackstring{})
 }

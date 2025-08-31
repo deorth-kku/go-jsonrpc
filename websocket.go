@@ -635,8 +635,11 @@ func (c *wsConn) getMethodHandler(method string) (methodHandler, bool) {
 
 func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 	defer io.Copy(io.Discard, r)
-	// debug util - dump all messages to stderr
-	// r = io.TeeReader(r, os.Stderr)
+	if debugTrace {
+		tv := NewTeeLogValue(r)
+		r = tv.r
+		defer c.getlogger().Debug("debugTrace frame string", "json", tv)
+	}
 	var frame frame
 	frame.Result.functy = func() reflect.Type {
 		req, ok := LoadAssert[clientRequest](c.inflight.Load, frame.ID)

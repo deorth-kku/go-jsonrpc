@@ -3,10 +3,10 @@ module github.com/filecoin-project/go-jsonrpc
 go 1.25
 
 require (
-	github.com/deorth-kku/go-common v0.0.0-20250824051139-1d3a52a81fc1
+	github.com/deorth-kku/go-common v0.0.0-20250831033722-ebfc026e68dc
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 )
 
 require (

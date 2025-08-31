@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
-	"runtime"
 
 	"github.com/deorth-kku/go-common"
 )
@@ -214,7 +213,11 @@ type rpcErrFunc = func(w func(arg any) error, req *request, code ErrorCode, err 
 type chanOut = func(reflect.Value, any) error
 
 func (s *handler) handleReader(ctx context.Context, r io.Reader, w io.Writer, rpcError rpcErrFunc) {
-	// r = io.TeeReader(r, os.Stderr)
+	if debugTrace {
+		tv := NewTeeLogValue(r)
+		r = tv.r
+		defer s.logger.Debug("debugTrace request string", "json", tv)
+	}
 	jopts := WithContext(s.jsonOptions, ctx)
 	dec := jsontext.NewDecoder(LimitReader(r, s.maxRequestSize), jopts)
 	enc := jsontext.NewEncoder(w, jopts)
@@ -258,18 +261,6 @@ func (s *handler) do1req(ctx context.Context, dec *jsontext.Decoder, wf func(any
 	s.handle(ctx, req, wf, rpcError, func(bool) {}, nil)
 	return false
 }
-
-type stackstring struct{}
-
-func (stackstring) LogValue() slog.Value {
-	const bufsize = 4096
-	buf := make([]byte, bufsize)
-	l := runtime.Stack(buf, false)
-	buf = buf[:l]
-	return slog.StringValue(string(buf))
-}
-
-var _ slog.LogValuer = stackstring{}
 
 func (s *handler) doCall(methodName string, f reflect.Value, params []reflect.Value) (out []reflect.Value, err error) {
 	defer func() {
