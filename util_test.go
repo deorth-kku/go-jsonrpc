@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -31,7 +32,7 @@ func TestStack(t *testing.T) {
 }
 
 func getreq() *request {
-	list := make([]string, 100)
+	list := make([]string, 1)
 	return &request{
 		Jsonrpc: "2.0",
 		ID:      1,
@@ -63,4 +64,21 @@ func BenchmarkLen(b *testing.B) {
 	for b.Loop() {
 		_, _ = rd.Len()
 	}
+}
+
+func TestRead(t *testing.T) {
+	rd := NewJsonReader(getreq())
+	discard := make([]byte, 10)
+	var err error
+	count := 0
+	for {
+		var l int
+		l, err = rd.Read(discard)
+		if err != nil {
+			break
+		}
+		count += l
+	}
+	fmt.Println(count, err)
+	fmt.Println(rd.Len())
 }

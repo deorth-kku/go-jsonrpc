@@ -257,7 +257,8 @@ func (c *countWriter) Write(p []byte) (int, error) {
 func (j JsonReader) Len() (int64, error) {
 	wt := new(countWriter)
 	err := json.MarshalWrite(wt, j.data, j.options)
-	return int64(wt.n), err
+	// [json.MarshalWrite] does not write the tailing \n
+	return int64(wt.n + 1), err
 }
 
 type stackstring struct{}

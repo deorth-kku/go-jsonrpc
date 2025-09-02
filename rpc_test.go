@@ -589,7 +589,11 @@ func TestCtxHttp(t *testing.T) {
 	rpcServer.Register("CtxHandler", serverHandler)
 
 	// httptest stuff
-	testServ := httptest.NewServer(rpcServer)
+	testServ := httptest.NewUnstartedServer(rpcServer)
+	testServ.Config.Protocols = new(http.Protocols)
+	testServ.Config.Protocols.SetHTTP1(true)
+	testServ.Config.Protocols.SetUnencryptedHTTP2(true)
+	testServ.Start()
 	defer testServ.Close()
 
 	// setup client
@@ -616,12 +620,45 @@ func TestCtxHttp(t *testing.T) {
 
 	serverHandler.cancelled = false
 
+	// h2c client
+	client.Test = nil
+
 	closer()
+	h2c := new(http.Protocols)
+	h2c.SetUnencryptedHTTP2(true)
+	closer, err = NewClient(context.Background(), "http://"+testServ.Listener.Addr().String(), "CtxHandler", &client, nil,
+		WithHTTPClient(&http.Client{
+			Transport: &http.Transport{
+				Protocols:         h2c,
+				DisableKeepAlives: true,
+			}}))
+	require.NoError(t, err)
+
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	serverHandler.setCond()
+	client.Test(ctx)
+	<-serverHandler.lk.Done()
+
+	if !serverHandler.cancelled {
+		// I don't believe this will work on http2
+		t.Log("expected cancellation on the server side")
+	}
+	if serverHandler.connectionType != ConnectionTypeHTTP {
+		t.Error("wrong connection type")
+	}
+
+	serverHandler.cancelled = false
+
+	closer()
+
+	// no context
 
 	var noCtxClient struct {
 		Test func()
 	}
-	closer, err = NewClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "CtxHandler", &noCtxClient, nil)
+	closer, err = NewClient(context.Background(), "http://"+testServ.Listener.Addr().String(), "CtxHandler", &noCtxClient, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,11 +667,10 @@ func TestCtxHttp(t *testing.T) {
 	noCtxClient.Test()
 	<-serverHandler.lk.Done()
 
-	if serverHandler.cancelled || serverHandler.i != 2 {
+	if serverHandler.cancelled || serverHandler.i != 3 {
 		t.Error("wrong serverHandler state")
 	}
-	// connection type should have switched to WS
-	if serverHandler.connectionType != ConnectionTypeWS {
+	if serverHandler.connectionType != ConnectionTypeHTTP {
 		t.Error("wrong connection type")
 	}
 

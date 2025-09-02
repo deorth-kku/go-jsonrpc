@@ -283,6 +283,7 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 				if err != nil {
 					return clientResponse{}, err
 				}
+				defer config.httpClient.CloseIdleConnections()
 			}
 		}
 
