@@ -1,7 +1,8 @@
 package jsonrpc
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
+	"io"
 	"log/slog"
 	"os"
 	"testing"
@@ -27,4 +28,39 @@ var _ slog.LogValuer = stackstring{}
 func TestStack(t *testing.T) {
 	common.SetLogRaw(os.Stderr, slog.LevelDebug, common.TextFormat)
 	slog.Error("test stack", "test", 1, "stack", stackstring{})
+}
+
+func getreq() *request {
+	list := make([]string, 100)
+	return &request{
+		Jsonrpc: "2.0",
+		ID:      1,
+		Method:  "test",
+		Params:  getParam(common.AnySlice(list)...),
+	}
+}
+
+func BenchmarkJsonMarshal(b *testing.B) {
+	data := getreq()
+	b.ResetTimer()
+	for b.Loop() {
+		data, _ := json.Marshal(data)
+		_ = len(data)
+	}
+}
+
+func BenchmarkDiscard(b *testing.B) {
+	rd := NewJsonReader(getreq())
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = rd.WriteTo(io.Discard)
+	}
+}
+
+func BenchmarkLen(b *testing.B) {
+	rd := NewJsonReader(getreq())
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = rd.Len()
+	}
 }

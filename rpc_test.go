@@ -495,7 +495,8 @@ func TestParallelRPC(t *testing.T) {
 }
 
 type CtxHandler struct {
-	lk sync.Mutex
+	lk     context.Context
+	cancel context.CancelFunc
 
 	cancelled      bool
 	i              int
@@ -503,8 +504,7 @@ type CtxHandler struct {
 }
 
 func (h *CtxHandler) Test(ctx context.Context) {
-	h.lk.Lock()
-	defer h.lk.Unlock()
+	defer h.cancel()
 	timeout := time.After(300 * time.Millisecond)
 	h.i++
 	h.connectionType = GetConnectionType(ctx)
@@ -514,6 +514,10 @@ func (h *CtxHandler) Test(ctx context.Context) {
 	case <-ctx.Done():
 		h.cancelled = true
 	}
+}
+
+func (h *CtxHandler) setCond() {
+	h.lk, h.cancel = context.WithCancel(context.Background())
 }
 
 func TestCtx(t *testing.T) {
@@ -539,8 +543,9 @@ func TestCtx(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
+	serverHandler.setCond()
 	client.Test(ctx)
-	serverHandler.lk.Lock()
+	<-serverHandler.lk.Done()
 
 	if !serverHandler.cancelled {
 		t.Error("expected cancellation on the server side")
@@ -551,7 +556,6 @@ func TestCtx(t *testing.T) {
 
 	serverHandler.cancelled = false
 
-	serverHandler.lk.Unlock()
 	closer()
 
 	var noCtxClient struct {
@@ -562,9 +566,9 @@ func TestCtx(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	serverHandler.setCond()
 	noCtxClient.Test()
-
-	serverHandler.lk.Lock()
+	<-serverHandler.lk.Done()
 
 	if serverHandler.cancelled || serverHandler.i != 2 {
 		t.Error("wrong serverHandler state")
@@ -573,7 +577,6 @@ func TestCtx(t *testing.T) {
 		t.Error("wrong connection type")
 	}
 
-	serverHandler.lk.Unlock()
 	closer()
 }
 
@@ -600,8 +603,9 @@ func TestCtxHttp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
+	serverHandler.setCond()
 	client.Test(ctx)
-	serverHandler.lk.Lock()
+	<-serverHandler.lk.Done()
 
 	if !serverHandler.cancelled {
 		t.Error("expected cancellation on the server side")
@@ -612,7 +616,6 @@ func TestCtxHttp(t *testing.T) {
 
 	serverHandler.cancelled = false
 
-	serverHandler.lk.Unlock()
 	closer()
 
 	var noCtxClient struct {
@@ -623,9 +626,9 @@ func TestCtxHttp(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	serverHandler.setCond()
 	noCtxClient.Test()
-
-	serverHandler.lk.Lock()
+	<-serverHandler.lk.Done()
 
 	if serverHandler.cancelled || serverHandler.i != 2 {
 		t.Error("wrong serverHandler state")
@@ -635,7 +638,6 @@ func TestCtxHttp(t *testing.T) {
 		t.Error("wrong connection type")
 	}
 
-	serverHandler.lk.Unlock()
 	closer()
 }
 

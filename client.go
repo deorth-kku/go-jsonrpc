@@ -267,7 +267,8 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 	}
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		hreq, err := http.NewRequest("POST", addr, NewJsonReader(cr.req, WithContext(c.jsonOption, ctx)))
+		rd := NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+		hreq, err := http.NewRequest("POST", addr, rd)
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}
 		}
@@ -276,6 +277,13 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 
 		if ctx != nil {
 			hreq = hreq.WithContext(ctx)
+			if ctx.Done() != nil {
+				// try to fix http ctx cancel
+				hreq.ContentLength, err = rd.Len()
+				if err != nil {
+					return clientResponse{}, err
+				}
+			}
 		}
 
 		hreq.Header.Set("Content-Type", "application/json")

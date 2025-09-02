@@ -241,8 +241,23 @@ func (j *JsonReader) Read(b []byte) (int, error) {
 
 func (j JsonReader) WriteTo(rd io.Writer) (int64, error) {
 	enc := jsontext.NewEncoder(rd, j.options)
-	err := json.MarshalEncode(enc, j.data, j.options)
+	err := json.MarshalEncode(enc, j.data)
 	return enc.OutputOffset(), err
+}
+
+type countWriter struct {
+	n int
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	c.n += len(p)
+	return len(p), nil
+}
+
+func (j JsonReader) Len() (int64, error) {
+	wt := new(countWriter)
+	err := json.MarshalWrite(wt, j.data, j.options)
+	return int64(wt.n), err
 }
 
 type stackstring struct{}
