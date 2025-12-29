@@ -1222,6 +1222,10 @@ func (h *ErrHandler) TestMy(s string) error {
 	}
 }
 
+func (h *ErrHandler) TestStringError(str string) error {
+	return common.ErrorString(str)
+}
+
 func TestUserError(t *testing.T) {
 	// setup server
 
@@ -1231,12 +1235,14 @@ func TestUserError(t *testing.T) {
 		EBad = iota + FirstUserCode
 		EBad2
 		EMy
+		EStr
 	)
 
 	errs := NewErrors()
 	errs.Register(EBad, new(ErrSomethingBad))
 	errs.Register(EBad2, new(*ErrSomethingBad))
 	errs.Register(EMy, new(*ErrMyErr))
+	RegisterError[common.ErrorString](errs, EStr)
 
 	rpcServer := NewServer(WithServerErrors(errs))
 	rpcServer.Register("ErrHandler", serverHandler)
@@ -1248,9 +1254,10 @@ func TestUserError(t *testing.T) {
 	// setup client
 
 	var client struct {
-		Test   func() error
-		TestP  func() error
-		TestMy func(s string) error
+		Test            func() error
+		TestP           func() error
+		TestStringError func(s string) error
+		TestMy          func(s string) error
 	}
 	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "ErrHandler", []any{
 		&client,
@@ -1267,6 +1274,10 @@ func TestUserError(t *testing.T) {
 	require.Error(t, e)
 	require.Equal(t, "this happened: some event", e.Error())
 	require.Equal(t, "this happened: some event", e.(*ErrMyErr).Error())
+
+	e = client.TestStringError("some event")
+	require.Error(t, e)
+	require.Equal(t, "some event", e.Error())
 
 	closer()
 }

@@ -81,13 +81,9 @@ func (e *JSONRPCError) Error() string {
 	return e.Message
 }
 
-var (
-	_             error = (*JSONRPCError)(nil)
-	marshalableRT       = reflect.TypeFor[marshalable]()
-	errorCodecRT        = reflect.TypeFor[RPCErrorCodec]()
-)
+var _ error = (*JSONRPCError)(nil)
 
-func (e *JSONRPCError) val(errors *Errors) reflect.Value {
+func (e *JSONRPCError) val(errors *Errors, opts json.Options) reflect.Value {
 	if errors != nil {
 		t, ok := errors.byCode[e.Code]
 		if ok {
@@ -98,15 +94,22 @@ func (e *JSONRPCError) val(errors *Errors) reflect.Value {
 				v = reflect.New(t)
 			}
 
-			if v.Type().Implements(errorCodecRT) {
-				if err := common.MustOk(reflect.TypeAssert[RPCErrorCodec](v)).FromJSONRPCError(*e); err != nil {
+			if rpce, ok := reflect.TypeAssert[RPCErrorCodec](v); ok {
+				if err := rpce.FromJSONRPCError(*e); err != nil {
 					slog.Error("Error converting JSONRPCError to custom error", "type", t.String(), "code", e.Code, "err", err)
 					return reflect.ValueOf(e)
 				}
-			} else if len(e.Meta) > 0 && v.Type().Implements(marshalableRT) {
-				if err := common.MustOk(reflect.TypeAssert[marshalable](v)).UnmarshalJSON(e.Meta); err != nil {
-					slog.Error("Error unmarshalling error metadata to custom error", "type", t.String(), "code", e.Code, "err", err)
-					return reflect.ValueOf(e)
+			} else if e.Meta.IsValid() {
+				if v.Kind() == reflect.Pointer {
+					if err := json.Unmarshal(e.Meta, v.Interface(), opts); err != nil {
+						slog.Error("Error unmarshalling error metadata to custom error", "type", t.String(), "code", e.Code, "err", err)
+						return reflect.ValueOf(e)
+					}
+				} else if v.CanAddr() {
+					if err := json.Unmarshal(e.Meta, v.Addr().Interface(), opts); err != nil {
+						slog.Error("Error unmarshalling error metadata to custom error", "type", t.String(), "code", e.Code, "err", err)
+						return reflect.ValueOf(e)
+					}
 				}
 			}
 

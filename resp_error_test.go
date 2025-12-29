@@ -292,7 +292,7 @@ func TestRespErrorVal(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			errValue := tc.respError.val(&errorsMap)
+			errValue := tc.respError.val(&errorsMap, jsonDefault())
 			errInterface := errValue.Interface()
 			err, ok := errInterface.(error)
 			require.True(t, ok, "returned value does not implement error interface")

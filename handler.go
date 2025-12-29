@@ -288,23 +288,21 @@ func (s *handler) createError(err error) *JSONRPCError {
 		Message: err.Error(),
 	}
 
-	switch m := err.(type) {
-	case RPCErrorCodec:
+	if m, ok := err.(RPCErrorCodec); ok {
 		o, err := m.ToJSONRPCError()
 		if err != nil {
 			s.logger.Error("Failed to convert error to JSONRPCError", "err", err)
 		} else {
 			out = &o
 		}
-	case marshalable:
-		meta, marshalErr := m.MarshalJSON()
+	} else {
+		meta, marshalErr := json.Marshal(err, s.jsonOptions)
 		if marshalErr == nil {
 			out.Meta = meta
 		} else {
 			s.logger.Error("Failed to marshal error metadata", "err", marshalErr)
 		}
 	}
-
 	return out
 }
 

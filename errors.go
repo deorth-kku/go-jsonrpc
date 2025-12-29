@@ -1,7 +1,6 @@
 package jsonrpc
 
 import (
-	"encoding/json/v2"
 	"errors"
 	"reflect"
 )
@@ -59,11 +58,6 @@ func (e *Errors) Register(c ErrorCode, typ any) {
 
 	e.byType[rt] = c
 	e.byCode[c] = rt
-}
-
-type marshalable interface {
-	json.Marshaler
-	json.Unmarshaler
 }
 
 type RPCErrorCodec interface {
