@@ -4,6 +4,8 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"log/slog"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -292,9 +294,8 @@ func TestRespErrorVal(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			errValue := tc.respError.val(&errorsMap, jsonDefault())
-			errInterface := errValue.Interface()
-			err, ok := errInterface.(error)
+			errValue := tc.respError.val(&errorsMap, jsonDefault(), slog.Default())
+			err, ok := reflect.TypeAssert[error](errValue)
 			require.True(t, ok, "returned value does not implement error interface")
 			require.IsType(t, tc.expectedType, err)
 			require.Equal(t, tc.expectedMessage, err.Error())
