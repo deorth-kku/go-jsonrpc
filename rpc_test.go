@@ -1394,9 +1394,6 @@ func TestNotif(t *testing.T) {
 	t.Run("http", tc("http"))
 }
 
-type ObjectParamHandler struct {
-}
-
 type CustomParams struct {
 	I int
 }
@@ -1415,6 +1412,8 @@ func (CustomParams) MarshalJSONTo(*jsontext.Encoder) error {
 func (CustomParams) UnmarshalJSONFrom(*jsontext.Decoder) error {
 	return errors.ErrUnsupported
 }
+
+type ObjectParamHandler struct{}
 
 func (h *ObjectParamHandler) Call(ctx context.Context, ps Object[CustomParams]) (int, error) {
 	return ps.Value.I + 1, nil
@@ -1438,13 +1437,45 @@ func TestCallWithObjectParams(t *testing.T) {
 		&client,
 	}, nil)
 	require.NoError(t, err)
-
-	// do the call!
-
-	// this will block if it's not sent as a notification
 	n, err := client.Call(context.Background(), GetObject(CustomParams{I: 1}))
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
+
+	closer()
+}
+
+type OptionalParamHandler struct{}
+
+func (h *OptionalParamHandler) Call(ctx context.Context, ps ...string) (int, error) {
+	return len(ps), nil
+}
+
+func TestCallWithOptionalParams(t *testing.T) {
+	// setup server
+
+	rpcServer := NewServer()
+	rpcServer.Register("Raw", &OptionalParamHandler{})
+
+	// httptest stuff
+	testServ := httptest.NewServer(rpcServer)
+	defer testServ.Close()
+
+	// setup client
+	var client struct {
+		Call func(ctx context.Context, ps ...string) (int, error)
+	}
+	closer, err := NewMergeClient(context.Background(), "ws://"+testServ.Listener.Addr().String(), "Raw", []any{
+		&client,
+	}, nil)
+	require.NoError(t, err)
+
+	n, err := client.Call(context.Background(), "test", "1")
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+
+	n, err = client.Call(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
 
 	closer()
 }
@@ -1794,12 +1825,6 @@ func TestReverseCallWithCustomMethodName(t *testing.T) {
 	require.NoError(t, e)
 
 	closer()
-}
-
-type MethodTransformedHandler struct{}
-
-func (h *ObjectParamHandler) CallSomethingInSnakeCase(ctx context.Context, v int) (int, error) {
-	return v + 1, nil
 }
 
 type nilcheckerserver struct{}

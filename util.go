@@ -80,7 +80,11 @@ func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		return errNotAnArray
 	}
 	p.values = make([]reflect.Value, handler.nParams)
-	for i := range handler.nParams {
+	mustparalen := handler.nParams
+	if handler.isVariadic {
+		mustparalen--
+	}
+	for i := range mustparalen {
 		if dec.PeekKind() == ']' {
 			return errShortParams
 		}
@@ -90,6 +94,19 @@ func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 			return err
 		}
 		p.values[i] = rp.Elem()
+	}
+	if handler.isVariadic { // unmarshal optional params
+		rp := reflect.New(handler.paramReceivers[mustparalen]).Elem()
+		elemt := handler.paramReceivers[mustparalen].Elem()
+		for dec.PeekKind() != ']' {
+			item := reflect.New(elemt)
+			err = json.UnmarshalDecode(dec, item.Interface())
+			if err != nil {
+				return err
+			}
+			rp = reflect.Append(rp, item.Elem())
+		}
+		p.values[mustparalen] = rp
 	}
 	tok, err = dec.ReadToken()
 	if err != nil {
@@ -118,13 +135,32 @@ func (p *params) deferredUnmarshal(mh methodHandler) ([]byte, error) {
 	return dd.data, p.UnmarshalJSONFrom(dec)
 }
 
+func (p params) isVariadic() bool {
+	if p.getMethodHandler == nil {
+		return false
+	}
+	fn, _ := p.getMethodHandler()
+	return fn.isVariadic
+}
+
 func (p params) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if len(p.values) == 1 && p.values[0].Type().Implements(isObjectType) {
 		return json.MarshalEncode(enc, p.values[0].Interface())
 	}
-	anylist := make([]any, len(p.values))
-	for i, v := range p.values {
-		anylist[i] = v.Interface()
+	isVariadic := p.isVariadic()
+	mustparalen := len(p.values)
+	if isVariadic {
+		mustparalen--
+	}
+	anylist := make([]any, 0, mustparalen)
+	for _, v := range p.values[:mustparalen] {
+		anylist = append(anylist, v.Interface())
+	}
+	if isVariadic {
+		anylist = slices.Grow(anylist, p.values[mustparalen].Len())
+		for _, v := range p.values[mustparalen].Seq2() {
+			anylist = append(anylist, v.Interface())
+		}
 	}
 	return json.MarshalEncode(enc, anylist)
 }

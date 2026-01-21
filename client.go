@@ -596,6 +596,7 @@ type rpcFunc struct {
 	hasCtx int
 
 	hasObjectParams      bool
+	isVariadic           bool
 	returnValueIsChannel bool
 
 	retry  bool
@@ -636,6 +637,10 @@ func (fn *rpcFunc) processError(err error) []reflect.Value {
 	return out
 }
 
+func (fn *rpcFunc) methodHandler() (methodHandler, bool) {
+	return methodHandler{isVariadic: fn.isVariadic}, true
+}
+
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	var id any
 	if !fn.notify {
@@ -666,7 +671,10 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		Jsonrpc: "2.0",
 		ID:      id,
 		Method:  fn.name,
-		Params:  params{values: args},
+		Params: params{
+			getMethodHandler: fn.methodHandler,
+			values:           args,
+		},
 	}
 
 	b := backoff{
@@ -753,6 +761,7 @@ func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 		}
 		fun.hasObjectParams = true
 	}
+	fun.isVariadic = ftyp.IsVariadic()
 
 	return reflect.MakeFunc(ftyp, fun.handleRpcCall), nil
 }

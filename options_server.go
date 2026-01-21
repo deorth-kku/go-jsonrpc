@@ -115,8 +115,7 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 			// todo test that everything is closing correctly
 			cl.exiting = conn.exiting
 
-			requests := cl.setupRequestChan()
-			conn.requests = requests
+			conn.requests = cl.setupRequestChan()
 
 			calls := new(RP)
 

@@ -48,6 +48,7 @@ type methodHandler struct {
 
 	hasCtx          int
 	hasObjectParams bool
+	isVariadic      bool
 
 	errOut int
 	valOut int
@@ -200,6 +201,7 @@ func (s *handler) register(namespace string, r any) {
 
 			hasCtx:          hasCtx,
 			hasObjectParams: hasObjectParams,
+			isVariadic:      funcType.IsVariadic(),
 
 			errOut: errOut,
 			valOut: valOut,
@@ -269,8 +271,12 @@ func (s *handler) doCall(methodName string, f reflect.Value, params []reflect.Va
 			s.logger.Error("panic in rpc method", "method_name", methodName, "stack", stackstring{}, "err", err)
 		}
 	}()
-
-	out = f.Call(params)
+	meth, _ := s.getMethodHandler(methodName)
+	if meth.isVariadic {
+		out = f.CallSlice(params)
+	} else {
+		out = f.Call(params)
+	}
 	return
 }
 
