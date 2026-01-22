@@ -1444,6 +1444,39 @@ func TestCallWithObjectParams(t *testing.T) {
 	closer()
 }
 
+type ctxHandler struct{}
+
+func (h *ctxHandler) Call(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestHttpClientContext(t *testing.T) {
+	// setup server
+
+	rpcServer := NewServer()
+	rpcServer.Register("Raw", &ctxHandler{})
+
+	// httptest stuff
+	testServ := httptest.NewServer(rpcServer)
+	defer testServ.Close()
+
+	// setup client
+	var client struct {
+		Call func(ctx context.Context) error
+	}
+	clientctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	closer, err := NewMergeClient(clientctx, "http://"+testServ.Listener.Addr().String(), "Raw", []any{
+		&client,
+	}, nil)
+	require.NoError(t, err)
+	err = client.Call(context.Background())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	closer()
+}
+
 type OptionalParamHandler struct{}
 
 func (h *OptionalParamHandler) Call(ctx context.Context, ps ...string) (int, error) {

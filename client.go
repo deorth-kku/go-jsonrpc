@@ -256,7 +256,7 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 	}, nil
 }
 
-func httpClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
+func httpClient(clientctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
 	c := config.getclient(namespace)
 
 	stop := make(chan struct{})
@@ -265,9 +265,11 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 	if requestHeader == nil {
 		requestHeader = http.Header{}
 	}
-
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
+		ctx, cancel := MergeContext(ctx, clientctx)
+		defer cancel()
 		rd := NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+		defer rd.Close()
 		hreq, err := http.NewRequest("POST", addr, rd)
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}
@@ -275,20 +277,15 @@ func httpClient(ctx context.Context, addr string, namespace string, outs []any, 
 
 		hreq.Header = requestHeader.Clone()
 
-		if ctx != nil {
-			hreq = hreq.WithContext(ctx)
-			if ctx.Done() != nil {
-				// try to fix http ctx cancel
-				hreq.ContentLength, err = rd.Len()
-				if err != nil {
-					return clientResponse{}, err
-				}
-				defer config.httpClient.CloseIdleConnections()
-			}
+		hreq = hreq.WithContext(ctx)
+		// try to fix http ctx cancel
+		hreq.ContentLength, err = rd.Len()
+		if err != nil {
+			return clientResponse{}, err
 		}
+		defer config.httpClient.CloseIdleConnections()
 
 		hreq.Header.Set("Content-Type", "application/json")
-
 		httpResp, err := config.httpClient.Do(hreq)
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}

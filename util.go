@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -263,22 +265,58 @@ func NewJsonReader(data any, opts ...json.Options) *JsonReader {
 	}
 }
 
+func closeCloser[T io.Closer](c T) {
+	c.Close()
+}
+
 func (j *JsonReader) Read(b []byte) (int, error) {
 	if j.rd == nil {
 		var wt *io.PipeWriter
 		j.rd, wt = io.Pipe()
-		go func(wt io.WriteCloser) {
-			defer wt.Close()
-			j.WriteTo(wt)
-		}(wt)
+		go func() {
+			var err error
+			defer func() { wt.CloseWithError(err) }()
+			_, err = j.writeto(wt)
+		}()
+		runtime.AddCleanup(j, closeCloser, wt)
 	}
 	return j.rd.Read(b)
 }
 
-func (j JsonReader) WriteTo(rd io.Writer) (int64, error) {
-	enc := jsontext.NewEncoder(rd, j.options)
+func (j *JsonReader) Close() error {
+	if j.rd == nil {
+		j.setclose()
+		return nil
+	}
+	return j.rd.Close()
+}
+
+func (j JsonReader) writeto(wt io.Writer) (int64, error) {
+	enc := jsontext.NewEncoder(wt, j.options)
 	err := json.MarshalEncode(enc, j.data)
 	return enc.OutputOffset(), err
+}
+
+var (
+	closedPipe *io.PipeReader
+	pipeOnce   sync.Once
+)
+
+func (j *JsonReader) setclose() {
+	pipeOnce.Do(func() {
+		var wt *io.PipeWriter
+		closedPipe, wt = io.Pipe()
+		wt.Close()
+	})
+	j.rd = closedPipe
+}
+
+func (j *JsonReader) WriteTo(wt io.Writer) (int64, error) {
+	if j.rd != nil {
+		return io.Copy(wt, j.rd)
+	}
+	j.setclose()
+	return j.writeto(wt)
 }
 
 type countWriter struct {
@@ -294,6 +332,7 @@ func (j JsonReader) Len() (int64, error) {
 	wt := new(countWriter)
 	err := json.MarshalWrite(wt, j.data, j.options)
 	// [json.MarshalWrite] does not write the tailing \n
+	// this is faster than using [jsontext.Encoder.OutputOffset]
 	return int64(wt.n + 1), err
 }
 
@@ -324,4 +363,60 @@ func NewTeeLogValue(r io.Reader) teeValue {
 	v := teeValue{str: new(strings.Builder)}
 	v.r = io.TeeReader(r, v.str)
 	return v
+}
+
+type mergedContext struct {
+	a, b context.Context
+}
+
+func (m *mergedContext) Deadline() (time.Time, bool) {
+	a, ok := m.a.Deadline()
+	if !ok {
+		return m.b.Deadline()
+	}
+	b, ok := m.b.Deadline()
+	if !ok {
+		return a, true
+	}
+	if a.After(b) {
+		return b, true
+	}
+	return a, true
+}
+
+func (m *mergedContext) Value(key any) any {
+	v := m.a.Value(key)
+	if v == nil {
+		return m.b.Value(key)
+	}
+	return v
+}
+
+func (m *mergedContext) Done() <-chan struct{} {
+	return m.b.Done()
+}
+
+func (m *mergedContext) Err() error {
+	aerr := m.a.Err()
+	if aerr == nil {
+		return m.b.Err()
+	}
+	return aerr
+}
+
+func MergeContext(a, b context.Context) (context.Context, context.CancelFunc) {
+	switch a {
+	case context.Background(), context.TODO(), nil:
+		return context.WithCancel(b)
+	}
+	switch b {
+	case context.Background(), context.TODO(), nil:
+		return context.WithCancel(a)
+	}
+	balt, cancel := context.WithCancel(b)
+	stop := context.AfterFunc(a, cancel)
+	return &mergedContext{a, balt}, func() {
+		stop()
+		cancel()
+	}
 }

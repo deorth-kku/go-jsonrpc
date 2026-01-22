@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/deorth-kku/go-common"
@@ -81,4 +82,36 @@ func TestRead(t *testing.T) {
 	}
 	fmt.Println(count, err)
 	fmt.Println(rd.Len())
+}
+
+func TestJsonReaderClose(t *testing.T) {
+	rd := NewJsonReader(getreq())
+	io.ReadAll(rd)
+	n, _ := io.ReadAll(rd)
+	if len(n) != 0 {
+		t.Error("still read")
+	}
+
+	rd = NewJsonReader(getreq())
+	io.Copy(io.Discard, rd)
+	l, _ := io.Copy(io.Discard, rd)
+	if l != 0 {
+		t.Error("still read")
+	}
+
+	rd = NewJsonReader(getreq())
+	io.ReadAll(rd)
+	l, _ = io.Copy(io.Discard, rd)
+	if l != 0 {
+		t.Error("still read")
+	}
+
+	rd = NewJsonReader(getreq())
+	io.Copy(io.Discard, rd)
+	n, _ = io.ReadAll(rd)
+	if len(n) != 0 {
+		t.Error("still read")
+	}
+
+	runtime.GC()
 }
