@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"runtime/pprof"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -171,7 +172,7 @@ type client struct {
 	errors    *Errors
 
 	doRequest func(context.Context, clientRequest) (clientResponse, error)
-	exiting   <-chan struct{}
+	ctx       context.Context
 	idCtr     int64
 
 	methodNameFormatter MethodNameFormatter
@@ -210,10 +211,8 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 		o(&config)
 	}
 
-	c := config.getclient(namespace)
-
-	stop := make(chan struct{})
-	c.exiting = stop
+	clientctx, cancel := context.WithCancel(context.Background())
+	c := config.getclient(clientctx, namespace)
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		b, err := json.Marshal(&cr.req, c.jsonOption)
@@ -221,9 +220,8 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
 		}
 
-		if ctx == nil {
-			ctx = context.Background()
-		}
+		ctx, cancel := MergeContext(ctx, clientctx)
+		defer cancel()
 
 		rawResp, err := doRequest(ctx, b)
 		if err != nil {
@@ -248,19 +246,16 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 	}
 
 	if err := c.provide(outs); err != nil {
+		cancel()
 		return nil, err
 	}
 
-	return func() {
-		close(stop)
-	}, nil
+	return ClientCloser(cancel), nil
 }
 
 func httpClient(clientctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
-	c := config.getclient(namespace)
-
-	stop := make(chan struct{})
-	c.exiting = stop
+	clientctx, cancel := context.WithCancel(clientctx)
+	c := config.getclient(clientctx, namespace)
 
 	if requestHeader == nil {
 		requestHeader = http.Header{}
@@ -315,12 +310,11 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 	}
 
 	if err := c.provide(outs); err != nil {
+		cancel()
 		return nil, err
 	}
 
-	return func() {
-		close(stop)
-	}, nil
+	return ClientCloser(cancel), nil
 }
 
 func websocketClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
@@ -349,13 +343,10 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		connFactory = nil
 	}
 
-	c := config.getclient(namespace)
+	ctx, cancel := context.WithCancel(ctx)
+	c := config.getclient(ctx, namespace)
 
 	requests := c.setupRequestChan()
-
-	stop := make(chan struct{})
-	exiting := make(chan struct{})
-	c.exiting = exiting
 
 	var hnd requestHandler
 	if len(config.reverseHandlers) > 0 {
@@ -377,22 +368,22 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		timeout:          config.timeout,
 		handler:          hnd,
 		requests:         requests,
-		stop:             stop,
-		exiting:          exiting,
+		ctx:              ctx,
 	}
-
-	go func() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		lbl := pprof.Labels("jrpc-mode", "wsclient", "jrpc-remote", addr, "jrpc-local", conn.LocalAddr().String(), "jrpc-uuid", uuid.New().String())
 		pprof.Do(ctx, lbl, wconn.handleWsConn)
-	}()
+	})
 
 	if err := c.provide(outs); err != nil {
+		cancel()
 		return nil, err
 	}
 
 	return func() {
-		close(stop)
-		<-exiting
+		cancel()
+		wg.Wait()
 	}, nil
 }
 
@@ -402,7 +393,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		select {
 		case requests <- cr:
-		case <-c.exiting:
+		case <-c.ctx.Done():
 			return clientResponse{}, fmt.Errorf("websocket routine exiting")
 		}
 
@@ -431,7 +422,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 				}
 				select {
 				case requests <- cancelReq:
-				case <-c.exiting:
+				case <-c.ctx.Done():
 					c.logger.Warn("failed to send request cancellation, websocket routing exited")
 				}
 

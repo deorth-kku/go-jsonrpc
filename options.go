@@ -39,13 +39,14 @@ type Config struct {
 	jsonOptions json.Options
 }
 
-func (c Config) getclient(namespace string) client {
+func (c Config) getclient(ctx context.Context, namespace string) client {
 	return client{
 		namespace:           namespace,
 		errors:              c.errors,
 		methodNameFormatter: c.methodNamer,
 		logger:              c.logger,
 		jsonOption:          c.jsonOptions,
+		ctx:                 ctx,
 	}
 }
 

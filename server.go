@@ -95,7 +95,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 		conn:         c,
 		handler:      s,
 		pingInterval: s.pingInterval,
-		exiting:      make(chan struct{}),
+		ctx:          ctx,
 	}
 
 	if s.reverseClientBuilder != nil {

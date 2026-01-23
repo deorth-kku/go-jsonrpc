@@ -77,8 +77,7 @@ type wsConn struct {
 	requests         <-chan clientRequest
 	pongs            chan struct{}
 	stopPings        func()
-	stop             <-chan struct{}
-	exiting          chan struct{}
+	ctx              context.Context
 
 	// incoming messages
 	incoming    chan io.Reader
@@ -172,7 +171,10 @@ func (c *wsConn) nextMessage() {
 		close(c.incoming)
 		return
 	}
-	c.incoming <- r
+	select {
+	case c.incoming <- r:
+	case <-c.ctx.Done():
+	}
 }
 
 func (c *wsConn) getlogger() *slog.Logger {
@@ -198,6 +200,7 @@ func (c *wsConn) sendJSON(req any) error {
 		return err
 	}
 	defer wt.Close()
+
 	enc := jsontext.NewEncoder(wt, c.jsonOptions())
 	return json.MarshalEncode(enc, req, c.jsonOptions())
 }
@@ -210,7 +213,7 @@ func (c *wsConn) sendJSON(req any) error {
 // (forwards channel messages to client)
 func (c *wsConn) handleOutChans() {
 	regV := reflect.ValueOf(c.registerCh)
-	exitV := reflect.ValueOf(c.exiting)
+	exitV := reflect.ValueOf(c.ctx.Done())
 
 	cases := []reflect.SelectCase{
 		{ // registration chan always 0
@@ -322,7 +325,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req any) error {
 		ch:   ch,
 	}:
 		return nil
-	case <-c.exiting:
+	case <-c.ctx.Done():
 		return errors.New("connection closing")
 	}
 }
@@ -540,7 +543,7 @@ func (c *wsConn) setupPings() func() {
 		return nil
 	})
 
-	stop := make(chan struct{})
+	ctx, cancel := context.WithCancel(c.ctx)
 
 	go func() {
 		for {
@@ -551,18 +554,12 @@ func (c *wsConn) setupPings() func() {
 					c.getlogger().Error("sending ping message", "err", err)
 				}
 				c.writeLk.Unlock()
-			case <-stop:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-
-	var o sync.Once
-	return func() {
-		o.Do(func() {
-			close(stop)
-		})
-	}
+	return cancel
 }
 
 // returns true if reconnected
@@ -692,16 +689,12 @@ func (c *wsConn) frameExecutor(ctx context.Context) {
 var maxQueuedFrames = 256
 
 func (c *wsConn) handleWsConn(ctx context.Context) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	c.incoming = make(chan io.Reader)
 	c.readError = make(chan error, 1)
 	c.frameExecQueue = make(chan frame, maxQueuedFrames)
 	c.pongs = make(chan struct{}, 1)
 
 	c.registerCh = make(chan outChanReg)
-	defer close(c.exiting)
 
 	// ////
 
@@ -831,7 +824,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 			}
 			// The client performs the reconnect operation, and if it exits it cannot start a handleWsConn again, so it does not need to exit
 			continue
-		case <-c.stop:
+		case <-c.ctx.Done():
 			c.writeLk.Lock()
 			cmsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 			if err := c.conn.WriteMessage(websocket.CloseMessage, cmsg); err != nil {

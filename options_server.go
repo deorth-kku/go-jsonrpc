@@ -110,10 +110,8 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 			cl := client{
 				namespace:           namespace,
 				methodNameFormatter: c.methodNameFormatter,
+				ctx:                 conn.ctx, // todo test that everything is closing correctly
 			}
-
-			// todo test that everything is closing correctly
-			cl.exiting = conn.exiting
 
 			conn.requests = cl.setupRequestChan()
 
