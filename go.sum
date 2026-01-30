@@ -1,5 +1,9 @@
 github.com/deorth-kku/go-common v0.0.0-20260130051247-c31ebf045b80 h1:/4zKExxCzey0tDqASZX+R5g/4LlxqXIwf3K47opdMaI=
 github.com/deorth-kku/go-common v0.0.0-20260130051247-c31ebf045b80/go.mod h1:wu1n859VPJwzWyY3WPzGM21PFeKq+YY79e92QoaGFPk=
+github.com/deorth-kku/go-common v0.0.0-20260130125427-513869c0d3b0 h1:B7PcIGnIVARwYp+DPnszXVdLFXJ6z1lw+etzTEe9N8c=
+github.com/deorth-kku/go-common v0.0.0-20260130125427-513869c0d3b0/go.mod h1:wu1n859VPJwzWyY3WPzGM21PFeKq+YY79e92QoaGFPk=
+github.com/deorth-kku/go-common v0.0.0-20260130130410-826603dc6e46 h1:7wyCdbC2oY4e3Ukd8XlIEwq+AFsZqbofn+SwR/A98qA=
+github.com/deorth-kku/go-common v0.0.0-20260130130410-826603dc6e46/go.mod h1:wu1n859VPJwzWyY3WPzGM21PFeKq+YY79e92QoaGFPk=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
