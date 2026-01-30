@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	ctest "github.com/deorth-kku/go-common/test"
 )
 
 type ComplexData struct {
@@ -183,7 +183,7 @@ func TestRespErrorVal(t *testing.T) {
 	testCases := []struct {
 		name            string
 		respError       *JSONRPCError
-		expectedType    any
+		expectedType    reflect.Type
 		expectedMessage string
 		verify          func(t *testing.T, err error)
 	}{
@@ -193,7 +193,7 @@ func TestRespErrorVal(t *testing.T) {
 				Code:    1000,
 				Message: "this is ignored",
 			},
-			expectedType:    &StaticError{},
+			expectedType:    reflect.TypeFor[*StaticError](),
 			expectedMessage: "static error",
 		},
 		{
@@ -202,7 +202,7 @@ func TestRespErrorVal(t *testing.T) {
 				Code:    1001,
 				Message: "simple error occurred",
 			},
-			expectedType:    &SimpleError{},
+			expectedType:    reflect.TypeFor[*SimpleError](),
 			expectedMessage: "simple error occurred",
 		},
 		{
@@ -212,12 +212,10 @@ func TestRespErrorVal(t *testing.T) {
 				Message: "data error occurred",
 				Data:    "additional data",
 			},
-			expectedType:    &DataStringError{},
+			expectedType:    reflect.TypeFor[*DataStringError](),
 			expectedMessage: "data error occurred",
 			verify: func(t *testing.T, err error) {
-				require.IsType(t, &DataStringError{}, err)
-				require.Equal(t, "data error occurred", err.Error())
-				require.Equal(t, "additional data", err.(*DataStringError).Data)
+				ctest.DeepEqual(t, "additional data", err.(*DataStringError).Data)
 			},
 		},
 		{
@@ -227,10 +225,10 @@ func TestRespErrorVal(t *testing.T) {
 				Message: "data error occurred",
 				Data:    jsontext.Value(`{"foo":"boop","bar":101}`),
 			},
-			expectedType:    &DataComplexError{},
+			expectedType:    reflect.TypeFor[*DataComplexError](),
 			expectedMessage: "data error occurred",
 			verify: func(t *testing.T, err error) {
-				require.Equal(t, ComplexData{Foo: "boop", Bar: 101}, err.(*DataComplexError).internalData)
+				ctest.Equal(t, ComplexData{Foo: "boop", Bar: 101}, err.(*DataComplexError).internalData)
 			},
 		},
 		{
@@ -247,11 +245,11 @@ func TestRespErrorVal(t *testing.T) {
 					return metaData
 				}(),
 			},
-			expectedType:    &MetaError{},
+			expectedType:    reflect.TypeFor[*MetaError](),
 			expectedMessage: "meta error occurred",
 			verify: func(t *testing.T, err error) {
 				// details will also be included in the error message since it implements the marshable interface
-				require.Equal(t, "meta details", err.(*MetaError).Details)
+				ctest.Equal(t, "meta details", err.(*MetaError).Details)
 			},
 		},
 		{
@@ -270,11 +268,11 @@ func TestRespErrorVal(t *testing.T) {
 					return metaData
 				}(),
 			},
-			expectedType:    &ComplexError{},
+			expectedType:    reflect.TypeFor[*ComplexError](),
 			expectedMessage: "complex error occurred",
 			verify: func(t *testing.T, err error) {
-				require.Equal(t, ComplexData{Foo: "foo", Bar: 42}, err.(*ComplexError).Data)
-				require.Equal(t, "complex details", err.(*ComplexError).Details)
+				ctest.Equal(t, ComplexData{Foo: "foo", Bar: 42}, err.(*ComplexError).Data)
+				ctest.Equal(t, "complex details", err.(*ComplexError).Details)
 			},
 		},
 		{
@@ -284,10 +282,10 @@ func TestRespErrorVal(t *testing.T) {
 				Message: "unregistered error occurred",
 				Data:    jsontext.Value(`"some data"`),
 			},
-			expectedType:    &JSONRPCError{},
+			expectedType:    reflect.TypeFor[*JSONRPCError](),
 			expectedMessage: "unregistered error occurred",
 			verify: func(t *testing.T, err error) {
-				require.Equal(t, jsontext.Value(`"some data"`), err.(*JSONRPCError).Data)
+				ctest.DeepEqual(t, jsontext.Value(`"some data"`), err.(*JSONRPCError).Data)
 			},
 		},
 	}
@@ -296,9 +294,9 @@ func TestRespErrorVal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			errValue := tc.respError.val(&errorsMap, jsonDefault(), slog.Default())
 			err, ok := reflect.TypeAssert[error](errValue)
-			require.True(t, ok, "returned value does not implement error interface")
-			require.IsType(t, tc.expectedType, err)
-			require.Equal(t, tc.expectedMessage, err.Error())
+			ctest.Equal(t, ok, true, "returned value does not implement error interface")
+			ctest.IsReflectType(t, err, tc.expectedType)
+			ctest.Equal(t, tc.expectedMessage, err.Error())
 			if tc.verify != nil {
 				tc.verify(t, err)
 			}

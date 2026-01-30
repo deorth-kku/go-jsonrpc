@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
+	ctest "github.com/deorth-kku/go-common/test"
 	"github.com/filecoin-project/go-jsonrpc"
 )
 
@@ -49,20 +48,20 @@ func TestReaderProxy(t *testing.T) {
 				StringReader func(ctx context.Context, u string) (io.Reader, error)
 			}
 			closer, err := jsonrpc.NewMergeClient(context.Background(), url, "ReaderHandler", []any{&client}, nil, pe, rd)
-			require.NoError(t, err)
+			ctest.NoError(t, err)
 			defer closer()
 
 			const potatos = "pooooootato"
 
 			read, err := client.ReadAll(context.TODO(), strings.NewReader(potatos))
-			require.NoError(t, err)
-			require.Equal(t, potatos, string(read), "potatos weren't equal")
+			ctest.NoError(t, err)
+			ctest.Equal(t, potatos, string(read), "potatos weren't equal")
 
 			reader, err := client.StringReader(context.TODO(), potatos)
-			require.NoError(t, err)
+			ctest.NoError(t, err)
 			str, err := readString(reader)
-			require.NoError(t, err)
-			require.Equal(t, potatos, str, "potatos weren't equal")
+			ctest.NoError(t, err)
+			ctest.Equal(t, potatos, str, "potatos weren't equal")
 		})
 	}
 }

@@ -1,14 +1,14 @@
 package jsonrpc
 
 import (
-	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	ctest "github.com/deorth-kku/go-common/test"
 )
 
 func TestDifferentMethodNamers(t *testing.T) {
@@ -46,11 +46,10 @@ func TestDifferentMethodNamers(t *testing.T) {
 
 			req := fmt.Sprintf(`{"jsonrpc": "2.0", "method": "%s", "params": [], "id": 1}`, test.requestedMethod)
 
-			res, err := http.Post(testServ.URL, "application/json", strings.NewReader(req))
-			require.NoError(t, err)
+			res := ctest.Must31(t, http.Post, testServ.URL, "application/json", io.Reader(strings.NewReader(req)))
 
-			require.Equal(t, http.StatusOK, res.StatusCode)
-			require.Equal(t, int32(1), serverHandler.n)
+			ctest.Equal(t, http.StatusOK, res.StatusCode)
+			ctest.Equal(t, int32(1), serverHandler.n)
 		})
 	}
 }
@@ -106,9 +105,8 @@ func TestDifferentMethodNamersWithClient(t *testing.T) {
 			var client struct {
 				AddGet func(int) int
 			}
-
-			closer, err := NewMergeClient(
-				context.Background(),
+			closer := ctest.Must51Ex(t, NewMergeClient,
+				t.Context(),
 				test.urlPrefix+testServ.Listener.Addr().String(),
 				"SimpleServerHandler",
 				[]any{&client},
@@ -116,11 +114,10 @@ func TestDifferentMethodNamersWithClient(t *testing.T) {
 				WithHTTPClient(testServ.Client()),
 				WithMethodNameFormatter(test.namer),
 			)
-			require.NoError(t, err)
 			defer closer()
 
 			n := client.AddGet(123)
-			require.Equal(t, 123, n)
+			ctest.Equal(t, 123, n)
 		})
 	}
 }
