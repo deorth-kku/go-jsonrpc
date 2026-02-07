@@ -634,7 +634,7 @@ func TestCtxHttp(t *testing.T) {
 
 	if !serverHandler.cancelled {
 		// I don't believe this will work on http2
-		t.Log("expected cancellation on the server side")
+		t.Log("expected cancellation on the server side, but it's http2, so that's ok")
 	}
 	if serverHandler.connectionType != ConnectionTypeHTTP {
 		t.Error("wrong connection type")

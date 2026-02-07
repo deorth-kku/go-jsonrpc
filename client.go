@@ -282,8 +282,6 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		}
 		hreq.Header = requestHeader.Clone()
 
-		defer config.httpClient.CloseIdleConnections()
-
 		hreq.Header.Set("Content-Type", "application/json")
 		httpResp, err := config.httpClient.Do(hreq)
 		if err != nil {
