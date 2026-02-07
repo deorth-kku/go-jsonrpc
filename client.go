@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"encoding/json/jsontext"
@@ -215,13 +216,12 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 	c := config.getclient(clientctx, namespace)
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		b, err := json.Marshal(&cr.req, c.jsonOption)
+		ctx, cancel := MergeContext(ctx, clientctx)
+		defer cancel()
+		b, err := json.Marshal(&cr.req, WithContext(c.jsonOption, ctx))
 		if err != nil {
 			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
 		}
-
-		ctx, cancel := MergeContext(ctx, clientctx)
-		defer cancel()
 
 		rawResp, err := doRequest(ctx, b)
 		if err != nil {
@@ -233,7 +233,7 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.UnmarshalRead(rawResp, &resp, c.jsonOption); err != nil {
+			if err := json.UnmarshalRead(rawResp, &resp, WithContext(c.jsonOption, ctx)); err != nil {
 				return clientResponse{}, fmt.Errorf("unmarshaling response: %w", err)
 			}
 
@@ -261,23 +261,27 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		requestHeader = http.Header{}
 	}
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
+		hasCtx := ctx != clientctx
 		ctx, cancel := MergeContext(ctx, clientctx)
 		defer cancel()
-		rd := NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
-		defer rd.Close()
-		hreq, err := http.NewRequest("POST", addr, rd)
+
+		hreq, err := http.NewRequestWithContext(ctx, "POST", addr, nil)
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}
 		}
-
+		if hasCtx {
+			buffer, err := json.Marshal(&cr.req, WithContext(c.jsonOption, ctx))
+			if err != nil {
+				return clientResponse{}, &RPCConnectionError{err}
+			}
+			hreq.Body = io.NopCloser(bytes.NewReader(buffer))
+			hreq.ContentLength = int64(len(buffer))
+		} else {
+			hreq.Body = NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+			defer hreq.Body.Close()
+		}
 		hreq.Header = requestHeader.Clone()
 
-		hreq = hreq.WithContext(ctx)
-		// try to fix http ctx cancel
-		hreq.ContentLength, err = rd.Len()
-		if err != nil {
-			return clientResponse{}, err
-		}
 		defer config.httpClient.CloseIdleConnections()
 
 		hreq.Header.Set("Content-Type", "application/json")
@@ -297,7 +301,7 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
 		if cr.req.ID != nil { // non-notification
-			if err := json.UnmarshalRead(httpResp.Body, &resp, c.jsonOption); err != nil {
+			if err := json.UnmarshalRead(httpResp.Body, &resp, WithContext(c.jsonOption, ctx)); err != nil {
 				return clientResponse{}, fmt.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
 			}
 
@@ -640,7 +644,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 		// converted to 3.0.
 	}
 
-	ctx := context.Background()
+	ctx := fn.client.ctx
 	if fn.hasCtx == 1 {
 		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
 		args = args[1:]

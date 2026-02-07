@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/deorth-kku/go-common"
+	ctest "github.com/deorth-kku/go-common/test"
 )
 
 func TestParams(t *testing.T) {
@@ -114,4 +116,14 @@ func TestJsonReaderClose(t *testing.T) {
 	}
 
 	runtime.GC()
+}
+
+func TestSplitContext(t *testing.T) {
+	a := t.Context()
+	b := common.Drop1(context.WithCancel(a))
+	merged, _ := MergeContext(a, b)
+	a2, b2 := SplitContext(merged)
+
+	ctest.Equal(t, a, a2)
+	ctest.Equal(t, b, b2)
 }

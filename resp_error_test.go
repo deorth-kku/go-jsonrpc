@@ -8,8 +8,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/deorth-kku/go-common"
 	ctest "github.com/deorth-kku/go-common/test"
 )
+
+var _ common.Unwraper = (*JSONRPCError)(nil)
 
 type ComplexData struct {
 	Foo string `json:"foo"`

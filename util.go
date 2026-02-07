@@ -366,15 +366,15 @@ func NewTeeLogValue(r io.Reader) teeValue {
 }
 
 type mergedContext struct {
-	a, b context.Context
+	left, right context.Context
 }
 
 func (m *mergedContext) Deadline() (time.Time, bool) {
-	a, ok := m.a.Deadline()
+	a, ok := m.left.Deadline()
 	if !ok {
-		return m.b.Deadline()
+		return m.right.Deadline()
 	}
-	b, ok := m.b.Deadline()
+	b, ok := m.right.Deadline()
 	if !ok {
 		return a, true
 	}
@@ -385,38 +385,52 @@ func (m *mergedContext) Deadline() (time.Time, bool) {
 }
 
 func (m *mergedContext) Value(key any) any {
-	v := m.a.Value(key)
+	v := m.left.Value(key)
 	if v == nil {
-		return m.b.Value(key)
+		return m.right.Value(key)
 	}
 	return v
 }
 
 func (m *mergedContext) Done() <-chan struct{} {
-	return m.b.Done()
+	return m.right.Done()
 }
 
 func (m *mergedContext) Err() error {
-	aerr := m.a.Err()
+	aerr := m.left.Err()
 	if aerr == nil {
-		return m.b.Err()
+		return m.right.Err()
 	}
 	return aerr
 }
 
-func MergeContext(a, b context.Context) (context.Context, context.CancelFunc) {
-	switch a {
+func MergeContext(left, right context.Context) (context.Context, context.CancelFunc) {
+	switch left {
 	case context.Background(), context.TODO(), nil:
-		return context.WithCancel(b)
+		return context.WithCancel(right)
 	}
-	switch b {
+	switch right {
 	case context.Background(), context.TODO(), nil:
-		return context.WithCancel(a)
+		return context.WithCancel(left)
 	}
-	balt, cancel := context.WithCancel(b)
-	stop := context.AfterFunc(a, cancel)
-	return &mergedContext{a, balt}, func() {
+	rightalt, cancel := context.WithCancel(right)
+	stop := context.AfterFunc(left, cancel)
+	return &mergedContext{left, rightalt}, func() {
 		stop()
 		cancel()
 	}
+}
+
+func SplitContext(merged context.Context) (left, right context.Context) {
+	mer, ok := merged.(*mergedContext)
+	if !ok {
+		return
+	}
+	left = mer.left
+	rv := reflect.ValueOf(mer.right).Elem().Field(0)
+	right, ok = reflect.TypeAssert[context.Context](rv)
+	if !ok {
+		panic("context package changed")
+	}
+	return
 }

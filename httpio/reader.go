@@ -30,7 +30,7 @@ func urlWithUUID(ustr string, id uuid.UUID) (*url.URL, error) {
 	return u, nil
 }
 
-func newRequest(u *url.URL, method string, body io.Reader, timeout time.Duration) (*http.Request, context.CancelFunc) {
+func newRequest(ctx context.Context, u *url.URL, method string, body io.Reader, timeout time.Duration) (*http.Request, context.CancelFunc) {
 	req := &http.Request{
 		Method: method,
 		URL:    u,
@@ -43,14 +43,21 @@ func newRequest(u *url.URL, method string, body io.Reader, timeout time.Duration
 			req.Body = io.NopCloser(body)
 		}
 	}
-	var ctx context.Context
 	var cancel context.CancelFunc
-	if timeout == 0 {
-		ctx, cancel = context.WithCancel(context.Background())
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 	} else {
-		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		ctx, cancel = context.WithCancel(ctx)
 	}
 	return req.WithContext(ctx), cancel
+}
+
+func safeSplitRight(ctx context.Context) context.Context {
+	_, right := jsonrpc.SplitContext(ctx)
+	if right != nil {
+		return right
+	}
+	return ctx
 }
 
 // this use [slog.Logger] and [http.Client] from [jsonrpc.Config].
@@ -69,9 +76,10 @@ func ReaderParamEncoder(addr string) jsonrpc.Option {
 			if err != nil {
 				return err
 			}
+			ctx := jsonrpc.ContextFrom(enc.Options())
 			go func() {
-				// TODO: figure out errors here
-				req, cancel := newRequest(u, http.MethodPost, rd, timeout)
+				ctx = safeSplitRight(ctx)
+				req, cancel := newRequest(ctx, u, http.MethodPost, rd, timeout)
 				defer cancel()
 				req.Header.Set(contentType, streamContentType)
 				resp, err := client.Do(req)
@@ -106,7 +114,9 @@ func ReaderResultDecoder(addr string) jsonrpc.Option {
 			if err != nil {
 				return err
 			}
-			req, cancel := newRequest(u, http.MethodGet, nil, timeout)
+			ctx := jsonrpc.ContextFrom(dec.Options())
+			ctx = safeSplitRight(ctx)
+			req, _ := newRequest(ctx, u, http.MethodGet, nil, timeout)
 			resp, err := client.Do(req)
 			if err != nil {
 				return err
@@ -120,9 +130,7 @@ func ReaderResultDecoder(addr string) jsonrpc.Option {
 					return fmt.Errorf("error when getting reader, status %d, uuid: %s, msg: %s", resp.StatusCode, reqID, str)
 				}
 			}
-			ctx, wrc := newWaitReader(req.Context(), resp.Body)
-			*rd = wrc
-			context.AfterFunc(ctx, cancel)
+			*rd = resp.Body
 			return nil
 		})(c)
 	}
@@ -139,28 +147,28 @@ func readString(rd io.Reader) (string, error) {
 
 type waitReadCloser struct {
 	io.ReadCloser
-	cancal context.CancelCauseFunc
+	cancel context.CancelFunc
 }
 
 func newWaitReader(ctx context.Context, reader io.ReadCloser) (context.Context, *waitReadCloser) {
 	wrc := &waitReadCloser{
 		ReadCloser: reader,
 	}
-	ctx, wrc.cancal = context.WithCancelCause(ctx)
+	ctx, wrc.cancel = context.WithCancel(ctx)
 	return ctx, wrc
 }
 
 func (w *waitReadCloser) Read(p []byte) (int, error) {
 	n, err := w.ReadCloser.Read(p)
 	if err != nil {
-		w.cancal(err)
+		w.cancel()
 	}
 	return n, err
 }
 
 func (w *waitReadCloser) Close() error {
 	err := w.ReadCloser.Close()
-	w.cancal(err)
+	w.cancel()
 	return err
 }
 
@@ -233,6 +241,10 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 	return hnd, dec
 }
 
+type SetContexter interface {
+	SetContext(context.Context)
+}
+
 func ReaderResultEncoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 	var readers sync.Map // map[uuid.UUID]io.Reader
 	var logger *slog.Logger
@@ -253,6 +265,9 @@ func ReaderResultEncoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 			http.Error(resp, fmt.Sprintf("reader not found by uuid: %s", strId), http.StatusBadRequest)
 		}
 		resp.Header().Set(contentType, streamContentType)
+		if set, ok := rd.(SetContexter); ok {
+			set.SetContext(req.Context())
+		}
 		_, err = io.Copy(resp, rd)
 		if err != nil {
 			logger.Warn("error when sending reader to client", "uuid", u, "err", err)

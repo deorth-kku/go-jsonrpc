@@ -5,6 +5,7 @@ import (
 	v1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -265,7 +266,7 @@ func OptionsStore[T any](opts json.Options, value T) json.Options {
 func OptionsLoad[T any](opts json.Options) (T, bool) {
 	var store optionsStore[T]
 	err := json.Unmarshal([]byte("{}"), &store, opts)
-	return store.value, err == isStored
+	return store.value, errors.Is(err, isStored)
 }
 
 // this is sort of black magic, but it allows us to pass context into json unmarshaling

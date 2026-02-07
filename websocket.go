@@ -182,7 +182,7 @@ func (c *wsConn) getlogger() *slog.Logger {
 }
 
 func (c *wsConn) jsonOptions() json.Options {
-	return c.handler.GetJsonOptions()
+	return WithContext(c.handler.GetJsonOptions(), c.ctx)
 }
 
 func (c *wsConn) sendJSON(req any) error {
@@ -412,6 +412,7 @@ func (c *wsConn) handleResponse(frame frame) {
 			Error: &JSONRPCError{
 				Code:    eTempWSError,
 				Message: err.Error(),
+				Data:    err,
 			},
 		}
 	}
@@ -503,6 +504,7 @@ func (c *wsConn) closeInFlight() {
 			Error: &JSONRPCError{
 				Message: "handler: websocket connection closed",
 				Code:    eTempWSError,
+				Data:    c.getIncomingErr(),
 			},
 		}
 	}
@@ -588,6 +590,7 @@ func (c *wsConn) tryReconnect(ctx context.Context) bool {
 			}
 			select {
 			case <-ctx.Done():
+				c.getlogger().Debug("give up on reconnect because of context", "error", context.Cause(ctx), "attempts", attempts)
 				return
 			default:
 			}
@@ -770,13 +773,14 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 
 			c.writeLk.Lock()
 			if req.req.ID != nil { // non-notification
-				if c.getIncomingErr() != nil { // No conn?, immediate fail
+				if err := c.getIncomingErr(); err != nil { // No conn?, immediate fail
 					req.ready <- clientResponse{
 						Jsonrpc: "2.0",
 						ID:      req.req.ID,
 						Error: &JSONRPCError{
 							Message: "handler: websocket connection closed",
 							Code:    eTempWSError,
+							Data:    err,
 						},
 					}
 					c.writeLk.Unlock()
@@ -797,6 +801,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 					resp.Error = &JSONRPCError{
 						Code:    eTempWSError,
 						Message: fmt.Sprintf("sendRequest: %s", serr),
+						Data:    serr,
 					}
 				}
 				req.ready <- resp

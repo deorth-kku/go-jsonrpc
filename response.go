@@ -81,6 +81,13 @@ func (e *JSONRPCError) Error() string {
 	return e.Message
 }
 
+func (e *JSONRPCError) Unwrap() error {
+	if err, ok := e.Data.(error); ok {
+		return err
+	}
+	return nil
+}
+
 var _ error = (*JSONRPCError)(nil)
 
 func (e *JSONRPCError) val(errors *Errors, opts json.Options, logger *slog.Logger) reflect.Value {
