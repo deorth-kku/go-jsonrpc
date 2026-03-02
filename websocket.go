@@ -28,7 +28,7 @@ var debugTrace = os.Getenv("JSONRPC_ENABLE_DEBUG_TRACE") == "1"
 type frame struct {
 	// common
 	Jsonrpc string            `json:"jsonrpc"`
-	ID      any               `json:"id,omitzero"`
+	ID      any               `json:"id"`
 	Meta    map[string]string `json:"meta,omitzero"`
 
 	// request
@@ -400,7 +400,7 @@ func (c *wsConn) handleChanClose(frame frame) {
 func (c *wsConn) handleResponse(frame frame) {
 	req, ok := LoadAssert[clientRequest](c.inflight.Load, frame.ID)
 	if !ok {
-		c.getlogger().Error("client got unknown ID in response", "reqID", frame.ID)
+		c.getlogger().Error("client got unknown ID in response", "reqID", frame.ID, "result", frame.Result, "error", frame.Error)
 		return
 	}
 	defer c.inflight.Delete(frame.ID)
@@ -439,14 +439,18 @@ func (c *wsConn) handleResponse(frame frame) {
 	}
 }
 
-func (c *wsConn) handleCall(ctx context.Context, frame frame) {
-	req := request{
-		Jsonrpc: frame.Jsonrpc,
-		ID:      frame.ID,
-		Meta:    frame.Meta,
-		Method:  frame.Method,
-		Params:  frame.Params,
+func (f frame) request() request {
+	return request{
+		Jsonrpc: f.Jsonrpc,
+		ID:      f.ID,
+		Meta:    f.Meta,
+		Method:  f.Method,
+		Params:  f.Params,
 	}
+}
+
+func (c *wsConn) handleCall(ctx context.Context, frame frame) {
+	req := frame.request()
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -665,8 +669,11 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 					Message: err.Error()}
 			}
 		} else if n, rerr := io.Copy(io.Discard, r); n == 0 && rerr == nil {
-			// skip json unmarshal errors
 			c.getlogger().Warn("incomplete frame without id", "error", err)
+			req := frame.request()
+			go rpcError(c.getlogger(), nil)(c.sendJSON, &req, rpcParseError, err)
+			go c.nextMessage()
+			return
 		} else {
 			c.getlogger().Warn("incomplete frame without id", "error", err)
 			c.readError <- fmt.Errorf("failed to unmarshal frame: %w", err)
@@ -676,7 +683,6 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 	if len(c.frameExecQueue) > 2*cap(c.frameExecQueue)/3 { // warn at 2/3 capacity
 		c.getlogger().Warn("frame executor queue is backlogged", "queued", len(c.frameExecQueue), "cap", cap(c.frameExecQueue))
 	}
-
 	// got the whole frame, can start reading the next one in background
 	go c.nextMessage()
 }

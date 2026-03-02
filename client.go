@@ -74,10 +74,18 @@ type resultValue struct {
 var (
 	_ json.UnmarshalerFrom = (*resultValue)(nil)
 	_ json.MarshalerTo     = (*resultValue)(nil)
+	_ slog.LogValuer       = (*resultValue)(nil)
 
 	reflectUint64Type = reflect.TypeFor[uint64]()
 	reflectyAnyType   = reflect.TypeFor[any]()
 )
+
+func (rv resultValue) LogValue() slog.Value {
+	if common.IsZero(rv.value) {
+		return slog.Value{}
+	}
+	return slog.AnyValue(rv.value.Interface())
+}
 
 func (rv *resultValue) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	if rv.functy == nil {
