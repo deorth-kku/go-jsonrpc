@@ -128,9 +128,9 @@ func (rv resultValue) MarshalJSONTo(enc *jsontext.Encoder) error {
 }
 
 type clientResponse struct {
-	Jsonrpc string        `json:"jsonrpc,omitzero"`
+	Jsonrpc string        `json:"jsonrpc"`
+	ID      any           `json:"id"`
 	Result  resultValue   `json:"result,omitzero"`
-	ID      any           `json:"id,omitzero"`
 	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
@@ -583,8 +583,8 @@ type rpcFunc struct {
 
 	// hasCtx is 1 if the function has a context.Context as its first argument.
 	// Used as the number of the first non-context argument.
-	hasCtx int
-
+	hasCtx               int
+	hasOptionalParams    int
 	hasObjectParams      bool
 	isVariadic           bool
 	returnValueIsChannel bool
@@ -628,7 +628,12 @@ func (fn *rpcFunc) processError(err error) []reflect.Value {
 }
 
 func (fn *rpcFunc) methodHandler() (methodHandler, bool) {
-	return methodHandler{isVariadic: fn.isVariadic}, true
+	return methodHandler{
+		hasCtx:            fn.hasCtx,
+		hasOptionalParams: fn.hasOptionalParams,
+		hasObjectParams:   fn.hasObjectParams,
+		isVariadic:        fn.isVariadic,
+	}, true
 }
 
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
@@ -747,11 +752,18 @@ func (c *client) makeRpcFunc(f reflect.StructField) (reflect.Value, error) {
 	// note: hasCtx is also the number of the first non-context argument
 	if ftyp.NumIn() > fun.hasCtx && ftyp.In(fun.hasCtx).Implements(isObjectType) {
 		if ftyp.NumIn() > fun.hasCtx+1 {
-			return reflect.Value{}, errors.New("raw params can't be mixed with other arguments")
+			return reflect.Value{}, errors.New("object params can't be mixed with other arguments")
 		}
 		fun.hasObjectParams = true
 	}
 	fun.isVariadic = ftyp.IsVariadic()
+	for i := range ftyp.NumIn() { // go1.26 ftyp.Ins()
+		if isOptional(ftyp.In(i)) {
+			fun.hasOptionalParams++
+		} else if fun.hasOptionalParams > 0 && (!fun.isVariadic || i != ftyp.NumIn()-1) { // variadic params can be after optional params
+			return reflect.Value{}, errors.New("non-optional params can't be after a optional param")
+		}
+	}
 
 	return reflect.MakeFunc(ftyp, fun.handleRpcCall), nil
 }

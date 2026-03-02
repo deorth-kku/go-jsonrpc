@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 
 	"github.com/deorth-kku/go-common"
 )
@@ -33,6 +34,12 @@ type isObject interface {
 	isObject()
 }
 
+type Optional[T any] *T
+
+func isOptional(t reflect.Type) bool {
+	return t.Kind() == reflect.Pointer && t.PkgPath() == "github.com/filecoin-project/go-jsonrpc" && strings.HasPrefix(t.Name(), "Optional")
+}
+
 var (
 	_            isObject = (Object[struct{}]{})
 	isObjectType          = reflect.TypeFor[isObject]()
@@ -46,9 +53,10 @@ type methodHandler struct {
 	receiver    reflect.Value
 	handlerFunc reflect.Value
 
-	hasCtx          int
-	hasObjectParams bool
-	isVariadic      bool
+	hasCtx            int
+	hasOptionalParams int // the count of optional params
+	hasObjectParams   bool
+	isVariadic        bool
 
 	errOut int
 	valOut int
@@ -58,7 +66,7 @@ type methodHandler struct {
 
 type request struct {
 	Jsonrpc string            `json:"jsonrpc"`
-	ID      any               `json:"id,omitempty"`
+	ID      any               `json:"id"`
 	Method  string            `json:"method"`
 	Params  params            `json:"params"`
 	Meta    map[string]string `json:"meta,omitempty"`
@@ -178,6 +186,7 @@ func (s *handler) register(namespace string, r any) {
 		}
 
 		hasObjectParams := false
+		hasOptionalParams := 0
 		ins := funcType.NumIn() - 1 - hasCtx
 		recvs := make([]reflect.Type, ins)
 		for i := range ins {
@@ -186,6 +195,10 @@ func (s *handler) register(namespace string, r any) {
 			}
 			if funcType.In(i + 1 + hasCtx).Implements(isObjectType) {
 				hasObjectParams = true
+			} else if isOptional(funcType.In(i + 1 + hasCtx)) {
+				hasOptionalParams++
+			} else if hasOptionalParams > 0 && (i != ins-1 && funcType.IsVariadic()) { // variadic params can be after optional params
+				panic("non-optional parameter found after optional parameter")
 			}
 			recvs[i] = method.Type.In(i + 1 + hasCtx)
 		}
@@ -199,9 +212,10 @@ func (s *handler) register(namespace string, r any) {
 			handlerFunc: method.Func,
 			receiver:    val,
 
-			hasCtx:          hasCtx,
-			hasObjectParams: hasObjectParams,
-			isVariadic:      funcType.IsVariadic(),
+			hasCtx:            hasCtx,
+			hasOptionalParams: hasOptionalParams,
+			hasObjectParams:   hasObjectParams,
+			isVariadic:        funcType.IsVariadic(),
 
 			errOut: errOut,
 			valOut: valOut,

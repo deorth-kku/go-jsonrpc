@@ -36,10 +36,10 @@ func (pe paramError) Error() string {
 }
 
 const (
-	errNoParam     paramError = "no params when params is required"
-	errShortParams paramError = "not enough params"
-	errExtraParams paramError = "extra params"
-	errNotAnArray  paramError = "param value is not an array"
+	ErrNoParam     paramError = "no params when params is required"
+	ErrShortParams paramError = "not enough params"
+	ErrExtraParams paramError = "extra params"
+	ErrNotAnArray  paramError = "param value is not an array"
 )
 
 func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
@@ -74,21 +74,21 @@ func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 	case '[':
 	case 'n':
 		if handler.nParams != 0 {
-			return errNoParam
+			return ErrNoParam
 		}
 		p.values = nil
 		return nil
 	default:
-		return errNotAnArray
+		return ErrNotAnArray
 	}
 	p.values = make([]reflect.Value, handler.nParams)
-	mustparalen := handler.nParams
+	mustparalen := handler.nParams - handler.hasOptionalParams
 	if handler.isVariadic {
 		mustparalen--
 	}
 	for i := range mustparalen {
 		if dec.PeekKind() == ']' {
-			return errShortParams
+			return ErrShortParams
 		}
 		rp := reflect.New(handler.paramReceivers[i])
 		err = json.UnmarshalDecode(dec, rp.Interface())
@@ -97,9 +97,20 @@ func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		}
 		p.values[i] = rp.Elem()
 	}
-	if handler.isVariadic { // unmarshal optional params
-		rp := reflect.New(handler.paramReceivers[mustparalen]).Elem()
-		elemt := handler.paramReceivers[mustparalen].Elem()
+	for i := range handler.hasOptionalParams {
+		rp := reflect.New(handler.paramReceivers[i+mustparalen])
+		if dec.PeekKind() != ']' {
+			err = json.UnmarshalDecode(dec, rp.Interface())
+			if err != nil {
+				return err
+			}
+		}
+		p.values[i+mustparalen] = rp.Elem()
+	}
+	if handler.isVariadic { // unmarshal variadic params
+		idx := mustparalen + handler.hasOptionalParams
+		rp := reflect.New(handler.paramReceivers[idx]).Elem()
+		elemt := handler.paramReceivers[idx].Elem()
 		for dec.PeekKind() != ']' {
 			item := reflect.New(elemt)
 			err = json.UnmarshalDecode(dec, item.Interface())
@@ -108,14 +119,14 @@ func (p *params) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 			}
 			rp = reflect.Append(rp, item.Elem())
 		}
-		p.values[mustparalen] = rp
+		p.values[idx] = rp
 	}
 	tok, err = dec.ReadToken()
 	if err != nil {
 		return err
 	}
 	if tok.Kind() != ']' {
-		return errExtraParams
+		return ErrExtraParams
 	}
 	return nil
 }
@@ -145,12 +156,26 @@ func (p params) isVariadic() bool {
 	return fn.isVariadic
 }
 
+func (p params) hasOptionalParams() int {
+	if p.getMethodHandler == nil {
+		return 0
+	}
+	fn, _ := p.getMethodHandler()
+	return fn.hasOptionalParams
+}
+
+const (
+	ErrExtraOptionalParams = paramError("non-nil optional params found after a nil one")
+	ErrExtraVariadicParams = paramError("variadic params found after nil optional params")
+)
+
 func (p params) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if len(p.values) == 1 && p.values[0].Type().Implements(isObjectType) {
 		return json.MarshalEncode(enc, p.values[0].Interface())
 	}
 	isVariadic := p.isVariadic()
-	mustparalen := len(p.values)
+	hasOptionalParams := p.hasOptionalParams()
+	mustparalen := len(p.values) - hasOptionalParams
 	if isVariadic {
 		mustparalen--
 	}
@@ -158,9 +183,24 @@ func (p params) MarshalJSONTo(enc *jsontext.Encoder) error {
 	for _, v := range p.values[:mustparalen] {
 		anylist = append(anylist, v.Interface())
 	}
+	oparamfull := true
+	for i := range hasOptionalParams {
+		oparam := p.values[mustparalen+i]
+		if oparam.IsNil() {
+			oparamfull = false
+			continue
+		} else if !oparamfull {
+			return ErrExtraOptionalParams
+		}
+		anylist = append(anylist, oparam.Interface())
+	}
 	if isVariadic {
-		anylist = slices.Grow(anylist, p.values[mustparalen].Len())
-		for _, v := range p.values[mustparalen].Seq2() {
+		vparam := p.values[mustparalen+hasOptionalParams]
+		if !oparamfull && vparam.Len() != 0 {
+			return ErrExtraVariadicParams
+		}
+		anylist = slices.Grow(anylist, vparam.Len())
+		for _, v := range vparam.Seq2() {
 			anylist = append(anylist, v.Interface())
 		}
 	}

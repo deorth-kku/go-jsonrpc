@@ -78,6 +78,7 @@ func (c *Config) GetHTTPClient() *http.Client {
 
 func jsonDefault() json.Options {
 	// workaround for https://github.com/golang/go/issues/75149
+	// go1.26
 	return json.JoinOptions(
 		v1.CallMethodsWithLegacySemantics(true),
 		v1.FormatByteArrayAsArray(true),

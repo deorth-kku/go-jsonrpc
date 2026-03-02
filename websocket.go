@@ -651,8 +651,8 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 	frame.Params.getMethodHandler = func() (methodHandler, bool) { return c.getMethodHandler(frame.Method) }
 	// use a autoResetReader in case the read takes a long time
 	if err := json.UnmarshalRead(c.autoResetReader(r), &frame, WithContext(c.jsonOptions(), ctx)); err != nil {
-		c.getlogger().Warn("failed to unmarshal frame", "error", err)
 		if frame.ID != nil {
+			c.getlogger().Warn("failed to unmarshal frame", "id", frame.ID, "error", err)
 			var perr paramError
 			if errors.As(err, &perr) {
 				frame.Error = &JSONRPCError{
@@ -664,9 +664,12 @@ func (c *wsConn) readFrame(ctx context.Context, r io.Reader) {
 					Code:    rpcParseError,
 					Message: err.Error()}
 			}
+		} else if n, rerr := io.Copy(io.Discard, r); n == 0 && rerr == nil {
+			// skip json unmarshal errors
+			c.getlogger().Warn("incomplete frame without id", "error", err)
 		} else {
-			c.readError <- fmt.Errorf("reading frame into a buffer: %w", err)
-			return
+			c.getlogger().Warn("incomplete frame without id", "error", err)
+			c.readError <- fmt.Errorf("failed to unmarshal frame: %w", err)
 		}
 	}
 	c.frameExecQueue <- frame
@@ -790,14 +793,13 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 			}
 			c.writeLk.Unlock()
 			serr := c.sendJSON(req.req)
-			if serr != nil {
-				c.getlogger().Error("sendReqest failed (Handle me)", "err", serr)
-			}
-			if req.req.ID == nil { // notification, return immediately
+			if req.req.ID == nil || serr != nil { // notification, return immediately
 				resp := clientResponse{
 					Jsonrpc: "2.0",
+					ID:      req.req.ID,
 				}
 				if serr != nil {
+					c.getlogger().Error("sendReqest failed", "err", serr)
 					resp.Error = &JSONRPCError{
 						Code:    eTempWSError,
 						Message: fmt.Sprintf("sendRequest: %s", serr),

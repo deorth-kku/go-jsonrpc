@@ -12,8 +12,8 @@ import (
 
 type response struct {
 	Jsonrpc string        `json:"jsonrpc"`
+	ID      any           `json:"id"`
 	Result  any           `json:"result,omitzero"`
-	ID      any           `json:"id,omitzero"`
 	Error   *JSONRPCError `json:"error,omitzero"`
 }
 
