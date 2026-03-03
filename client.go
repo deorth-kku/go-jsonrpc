@@ -400,6 +400,8 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	}, nil
 }
 
+const ErrWsExiting = common.ErrorString("websocket routine exiting")
+
 func (c *client) setupRequestChan() chan clientRequest {
 	requests := make(chan clientRequest)
 
@@ -407,7 +409,7 @@ func (c *client) setupRequestChan() chan clientRequest {
 		select {
 		case requests <- cr:
 		case <-c.ctx.Done():
-			return clientResponse{}, fmt.Errorf("websocket routine exiting")
+			return clientResponse{}, ErrWsExiting
 		}
 
 		var ctxDone <-chan struct{}

@@ -15,6 +15,7 @@ type jsonrpcReverseClient struct{ reflect.Type }
 type ServerConfig struct {
 	maxRequestSize int64
 	pingInterval   time.Duration
+	timeout        time.Duration
 
 	errors *Errors
 
@@ -32,6 +33,7 @@ func defaultServerConfig() ServerConfig {
 		maxRequestSize: DEFAULT_MAX_REQUEST_SIZE,
 
 		pingInterval:        5 * time.Second,
+		timeout:             30 * time.Second,
 		methodNameFormatter: DefaultMethodNameFormatter,
 		logger:              slog.Default(),
 		jsonOptions:         jsonDefault(),
@@ -85,6 +87,12 @@ func WithServerErrors(es Errors) ServerOption {
 func WithServerPingInterval(d time.Duration) ServerOption {
 	return func(c *ServerConfig) {
 		c.pingInterval = d
+	}
+}
+
+func WithServerTimeout(d time.Duration) ServerOption {
+	return func(c *ServerConfig) {
+		c.timeout = d
 	}
 }
 

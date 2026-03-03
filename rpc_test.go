@@ -1776,7 +1776,10 @@ func TestReverseCallDroppedConn(t *testing.T) {
 		res: make(chan error),
 	}
 
-	rpcServer := NewServer(WithReverseClient[RevCallTestClientProxy]("Client"))
+	rpcServer := NewServer(
+		WithReverseClient[RevCallTestClientProxy]("Client"),
+		WithServerTimeout(5*time.Second),
+	)
 	rpcServer.Register("Server", hnd)
 
 	// httptest stuff
@@ -1802,9 +1805,16 @@ func TestReverseCallDroppedConn(t *testing.T) {
 	ctest.True20(t, strings.Contains, e.Error(), "websocket connection closed")
 
 	res := <-hnd.res
-	ctest.Error(t, res)
-	ctest.True20(t, strings.Contains, res.Error(), "RPC client error: sendRequest failed: websocket routine exiting")
-	time.Sleep(100 * time.Millisecond)
+	if errors.Is(res, ErrWsExiting) {
+		return
+	}
+	istimeout := ctest.AsErrorType[timeouter](t, res).Timeout()
+	ctest.True(t, istimeout)
+}
+
+type timeouter interface {
+	error
+	Timeout() bool
 }
 
 type BigCallTestServerHandler struct {

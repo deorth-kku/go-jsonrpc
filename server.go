@@ -53,6 +53,7 @@ type RPCServer struct {
 	reverseClientBuilder func(context.Context, *wsConn) (context.Context, error)
 
 	pingInterval time.Duration
+	timeout      time.Duration
 }
 
 // NewServer creates new RPCServer instance
@@ -67,6 +68,7 @@ func NewServer(opts ...ServerOption) *RPCServer {
 		reverseClientBuilder: config.reverseClientBuilder,
 
 		pingInterval: config.pingInterval,
+		timeout:      config.timeout,
 	}
 }
 
@@ -95,6 +97,7 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 		conn:         c,
 		handler:      s,
 		pingInterval: s.pingInterval,
+		timeout:      s.timeout,
 		ctx:          ctx,
 	}
 
