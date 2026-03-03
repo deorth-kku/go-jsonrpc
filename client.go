@@ -236,7 +236,7 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 			return clientResponse{}, fmt.Errorf("doRequest failed: %w", err)
 		}
 
-		defer func() { _ = rawResp.Close() }()
+		defer rawResp.Close()
 
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
@@ -295,14 +295,13 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		if err != nil {
 			return clientResponse{}, &RPCConnectionError{err}
 		}
+		defer httpResp.Body.Close()
 
 		// likely a failure outside of our control and ability to inspect; jsonrpc server only ever
 		// returns json format errors with either a StatusBadRequest or a StatusInternalServerError
 		if httpResp.StatusCode > http.StatusBadRequest && httpResp.StatusCode != http.StatusInternalServerError {
 			return clientResponse{}, fmt.Errorf("request failed, http status %s", httpResp.Status)
 		}
-
-		defer func() { _ = httpResp.Body.Close() }()
 
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
