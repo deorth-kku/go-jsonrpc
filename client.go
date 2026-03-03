@@ -236,7 +236,7 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 			return clientResponse{}, fmt.Errorf("doRequest failed: %w", err)
 		}
 
-		defer rawResp.Close()
+		defer func() { _ = rawResp.Close() }()
 
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
@@ -302,7 +302,7 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 			return clientResponse{}, fmt.Errorf("request failed, http status %s", httpResp.Status)
 		}
 
-		defer httpResp.Body.Close()
+		defer func() { _ = httpResp.Body.Close() }()
 
 		var resp clientResponse
 		resp.Result.functy = func() reflect.Type { return cr.respType }
@@ -360,7 +360,11 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 
 	var hnd requestHandler
 	if len(config.reverseHandlers) > 0 {
-		h := makeHandler(defaultServerConfig())
+		sc := defaultServerConfig()
+		if config.reverseHandlersFormatter != nil {
+			sc.methodNameFormatter = config.reverseHandlersFormatter
+		}
+		h := makeHandler(sc)
 		h.aliasedMethods = config.aliasedHandlerMethods
 		for _, reverseHandler := range config.reverseHandlers {
 			h.register(reverseHandler.ns, reverseHandler.hnd)

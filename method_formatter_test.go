@@ -1,6 +1,7 @@
 package jsonrpc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -118,6 +119,56 @@ func TestDifferentMethodNamersWithClient(t *testing.T) {
 
 			n := client.AddGet(123)
 			ctest.Equal(t, 123, n)
+		})
+	}
+}
+
+func TestDifferentMethodNamersWithClientHandler(t *testing.T) {
+	tests := map[string]struct {
+		namer MethodNameFormatter
+	}{
+		"default namer & ws": {
+			namer: DefaultMethodNameFormatter,
+		},
+		"lower first char namer & ws": {
+			namer: NewMethodNameFormatter(true, LowerFirstCharCase),
+		},
+		"no namespace namer & ws": {
+			namer: NewMethodNameFormatter(false, OriginalCase),
+		},
+		"no namespace & lower first char & ws": {
+			namer: NewMethodNameFormatter(false, LowerFirstCharCase),
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			rpcServer := NewServer(WithReverseClient[RevCallTestClientProxy]("Client"), WithServerMethodNameFormatter(test.namer))
+			rpcServer.Register("Server", &RevCallTestServerHandler{})
+
+			// httptest stuff
+			testServ := httptest.NewServer(rpcServer)
+			defer testServ.Close()
+			// setup client
+
+			var client struct {
+				Call func() error
+			}
+
+			closer, err := NewMergeClient(
+				context.Background(),
+				"ws://"+testServ.Listener.Addr().String(),
+				"Server",
+				[]any{&client},
+				nil,
+				WithMethodNameFormatter(test.namer),
+				WithClientHandler("Client", &RevCallTestClientHandler{}),
+				WithClientHandlerFormatter(test.namer),
+			)
+			ctest.NoError(t, err)
+			defer closer()
+
+			e := client.Call()
+			ctest.NoError(t, e)
 		})
 	}
 }

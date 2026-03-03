@@ -806,6 +806,7 @@ func (c *wsConn) handleWsConn(ctx context.Context) {
 				}
 				if serr != nil {
 					c.getlogger().Error("sendReqest failed", "err", serr)
+					c.inflight.Delete(req.req.ID)
 					resp.Error = &JSONRPCError{
 						Code:    eTempWSError,
 						Message: fmt.Sprintf("sendRequest: %s", serr),
