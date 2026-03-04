@@ -215,27 +215,30 @@ func NewMergeClient(ctx context.Context, addr string, namespace string, outs []a
 
 // NewCustomClient is like NewMergeClient in single-request (http) mode, except it allows for a custom doRequest function
 func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Context, body []byte) (io.ReadCloser, error), opts ...Option) (ClientCloser, error) {
-	config := defaultConfig()
-	for _, o := range opts {
-		o(&config)
-	}
+	return NewCustomReaderClient(context.Background(), namespace, outs, func(ctx context.Context, body io.ReadCloser) (io.ReadCloser, error) {
+		buf := new(bytes.Buffer)
+		_, err := io.Copy(buf, body)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling request: %w", err)
+		}
+		return doRequest(ctx, buf.Bytes())
+	}, opts...)
+}
 
-	clientctx, cancel := context.WithCancel(context.Background())
+func newCustomReaderClient(ctx context.Context, namespace string, outs []any, doRequest func(ctx context.Context, body io.ReadCloser) (io.ReadCloser, error), config Config) (ClientCloser, error) {
+	clientctx, cancel := context.WithCancel(ctx)
 	c := config.getclient(clientctx, namespace)
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
 		ctx, cancel := MergeContext(ctx, clientctx)
 		defer cancel()
-		b, err := json.Marshal(&cr.req, WithContext(c.jsonOption, ctx))
-		if err != nil {
-			return clientResponse{}, fmt.Errorf("marshalling request: %w", err)
-		}
+		rd := NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+		defer rd.Close()
 
-		rawResp, err := doRequest(ctx, b)
+		rawResp, err := doRequest(ctx, rd)
 		if err != nil {
 			return clientResponse{}, fmt.Errorf("doRequest failed: %w", err)
 		}
-
 		defer rawResp.Close()
 
 		var resp clientResponse
@@ -261,31 +264,35 @@ func NewCustomClient(namespace string, outs []any, doRequest func(ctx context.Co
 	return ClientCloser(cancel), nil
 }
 
-func httpClient(clientctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
-	clientctx, cancel := context.WithCancel(clientctx)
-	c := config.getclient(clientctx, namespace)
+func NewCustomReaderClient(ctx context.Context, namespace string, outs []any, doRequest func(ctx context.Context, body io.ReadCloser) (io.ReadCloser, error), opts ...Option) (ClientCloser, error) {
+	config := defaultConfig()
+	for _, o := range opts {
+		o(&config)
+	}
+	return newCustomReaderClient(ctx, namespace, outs, doRequest, config)
+}
 
+func httpClient(clientctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
 	if requestHeader == nil {
 		requestHeader = http.Header{}
 	}
-	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
+	return newCustomReaderClient(clientctx, namespace, outs, func(ctx context.Context, body io.ReadCloser) (io.ReadCloser, error) {
 		hasCtx := ctx != clientctx
-		ctx, cancel := MergeContext(ctx, clientctx)
-		defer cancel()
-
 		hreq, err := http.NewRequestWithContext(ctx, "POST", addr, nil)
 		if err != nil {
-			return clientResponse{}, &RPCConnectionError{err}
+			return nil, &RPCConnectionError{err}
 		}
 		if hasCtx {
-			buffer, err := json.Marshal(&cr.req, WithContext(c.jsonOption, ctx))
+			buf := new(bytes.Buffer)
+			n, err := io.Copy(buf, body)
 			if err != nil {
-				return clientResponse{}, &RPCConnectionError{err}
+				return nil, fmt.Errorf("marshalling request: %w", err)
 			}
-			hreq.Body = io.NopCloser(bytes.NewReader(buffer))
-			hreq.ContentLength = int64(len(buffer))
+			hreq.Body = io.NopCloser(buf)
+			hreq.ContentLength = n
+
 		} else {
-			hreq.Body = NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+			hreq.Body = body
 			defer hreq.Body.Close()
 		}
 		hreq.Header = requestHeader.Clone()
@@ -293,37 +300,17 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		hreq.Header.Set("Content-Type", "application/json")
 		httpResp, err := config.httpClient.Do(hreq)
 		if err != nil {
-			return clientResponse{}, &RPCConnectionError{err}
+			return nil, &RPCConnectionError{err}
 		}
-		defer httpResp.Body.Close()
 
 		// likely a failure outside of our control and ability to inspect; jsonrpc server only ever
 		// returns json format errors with either a StatusBadRequest or a StatusInternalServerError
 		if httpResp.StatusCode > http.StatusBadRequest && httpResp.StatusCode != http.StatusInternalServerError {
-			return clientResponse{}, fmt.Errorf("request failed, http status %s", httpResp.Status)
+			httpResp.Body.Close()
+			return nil, fmt.Errorf("request failed, http status %s", httpResp.Status)
 		}
-
-		var resp clientResponse
-		resp.Result.functy = func() reflect.Type { return cr.respType }
-		if cr.req.ID != nil { // non-notification
-			if err := json.UnmarshalRead(httpResp.Body, &resp, WithContext(c.jsonOption, ctx)); err != nil {
-				return clientResponse{}, fmt.Errorf("http status %s unmarshaling response: %w", httpResp.Status, err)
-			}
-
-			if resp.ID != cr.req.ID {
-				return clientResponse{}, errors.New("request and response id didn't match")
-			}
-		}
-
-		return resp, nil
-	}
-
-	if err := c.provide(outs); err != nil {
-		cancel()
-		return nil, err
-	}
-
-	return ClientCloser(cancel), nil
+		return httpResp.Body, nil
+	}, config)
 }
 
 func websocketClient(ctx context.Context, addr string, namespace string, outs []any, requestHeader http.Header, config Config) (ClientCloser, error) {
