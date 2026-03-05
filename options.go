@@ -159,24 +159,32 @@ type (
 	MarshalerFunc[T any]   = func(*jsontext.Encoder, T) error
 )
 
-func updateUnmarshalers[T any](opts *json.Options, fn UnmarshalerFunc[T]) {
-	unmarshalers, ok := json.GetOption(*opts, json.WithUnmarshalers)
+func UpdateUnmarshalers[T any](opts json.Options, fn UnmarshalerFunc[T]) json.Options {
+	unmarshalers, ok := json.GetOption(opts, json.WithUnmarshalers)
 	if ok {
 		unmarshalers = json.JoinUnmarshalers(unmarshalers, json.UnmarshalFromFunc(fn))
 	} else {
 		unmarshalers = json.UnmarshalFromFunc(fn)
 	}
-	*opts = json.JoinOptions(*opts, json.WithUnmarshalers(unmarshalers))
+	return json.JoinOptions(opts, json.WithUnmarshalers(unmarshalers))
 }
 
-func updateMarshalers[T any](opts *json.Options, fn MarshalerFunc[T]) {
-	marshalers, ok := json.GetOption(*opts, json.WithMarshalers)
+func updateUnmarshalers[T any](opts *json.Options, fn UnmarshalerFunc[T]) {
+	*opts = UpdateUnmarshalers(*opts, fn)
+}
+
+func UpdateMarshalers[T any](opts json.Options, fn MarshalerFunc[T]) json.Options {
+	marshalers, ok := json.GetOption(opts, json.WithMarshalers)
 	if ok {
 		marshalers = json.JoinMarshalers(marshalers, json.MarshalToFunc(fn))
 	} else {
 		marshalers = json.MarshalToFunc(fn)
 	}
-	*opts = json.JoinOptions(*opts, json.WithMarshalers(marshalers))
+	return json.JoinOptions(opts, json.WithMarshalers(marshalers))
+}
+
+func updateMarshalers[T any](opts *json.Options, fn MarshalerFunc[T]) {
+	*opts = UpdateMarshalers(*opts, fn)
 }
 
 func WithResultUnmarshaler[T any](fn UnmarshalerFunc[*T]) func(c *Config) {
