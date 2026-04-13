@@ -48,6 +48,7 @@ func (c Config) getclient(ctx context.Context, namespace string) client {
 		methodNameFormatter: c.methodNamer,
 		logger:              c.logger,
 		jsonOption:          c.jsonOptions,
+		timeout:             c.timeout,
 		ctx:                 ctx,
 	}
 }

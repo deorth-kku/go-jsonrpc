@@ -116,9 +116,15 @@ func WithReverseClient[RP any](namespace string) ServerOption {
 	return func(c *ServerConfig) {
 		c.reverseClientBuilder = func(ctx context.Context, conn *wsConn) (context.Context, error) {
 			cl := client{
-				namespace:           namespace,
+				namespace: namespace,
+				errors:    c.errors,
+
+				ctx: conn.ctx,
+
 				methodNameFormatter: c.methodNameFormatter,
-				ctx:                 conn.ctx, // todo test that everything is closing correctly
+				logger:              conn.getlogger(),
+				jsonOption:          conn.jsonOptions(),
+				timeout:             conn.timeout,
 			}
 
 			conn.requests = cl.setupRequestChan()

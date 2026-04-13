@@ -187,6 +187,7 @@ type client struct {
 	methodNameFormatter MethodNameFormatter
 	logger              *slog.Logger
 	jsonOption          json.Options
+	timeout             time.Duration
 }
 
 // NewMergeClient is like NewClient, but allows to specify multiple structs
@@ -277,12 +278,11 @@ func httpClient(clientctx context.Context, addr string, namespace string, outs [
 		requestHeader = http.Header{}
 	}
 	return newCustomReaderClient(clientctx, namespace, outs, func(ctx context.Context, body io.ReadCloser) (io.ReadCloser, error) {
-		hasCtx := ctx != clientctx
 		hreq, err := http.NewRequestWithContext(ctx, "POST", addr, nil)
 		if err != nil {
 			return nil, &RPCConnectionError{err}
 		}
-		if hasCtx {
+		if HasReqCtx(ctx) {
 			buf := new(bytes.Buffer)
 			n, err := io.Copy(buf, body)
 			if err != nil {
@@ -567,7 +567,11 @@ func (c *client) sendRequest(ctx context.Context, req request, chCtor makeChanSi
 		retCh:    chCtor,
 		respType: ty,
 	}
-
+	if c.timeout != 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
 	return c.doRequest(ctx, creq)
 }
 
@@ -636,6 +640,12 @@ func (fn *rpcFunc) methodHandler() (methodHandler, bool) {
 	}, true
 }
 
+type withReqCtx struct{}
+
+func HasReqCtx(ctx context.Context) bool {
+	return ctx.Value(withReqCtx{}) != nil
+}
+
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	var id any
 	if !fn.notify {
@@ -650,6 +660,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	ctx := fn.client.ctx
 	if fn.hasCtx == 1 {
 		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
+		ctx = context.WithValue(ctx, withReqCtx{}, withReqCtx{})
 		args = args[1:]
 	}
 
