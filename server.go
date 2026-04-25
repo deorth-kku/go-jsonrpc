@@ -2,6 +2,9 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -121,6 +124,15 @@ func (s *RPCServer) handleWS(ctx context.Context, w http.ResponseWriter, r *http
 
 // TODO: return errors to clients per spec
 func (s *RPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if err := recover(); err != nil {
+			s.logger.Error("server panic", "err", err, "stack", stackstring{})
+			rpcError(s.logger, w.WriteHeader)(func(arg any) error {
+				return json.MarshalEncode(jsontext.NewEncoder(w), arg)
+			}, nil, rpcParseError, fmt.Errorf("server panic: %v", err))
+		}
+	}()
+
 	ctx := r.Context()
 
 	h := strings.ToLower(r.Header.Get("Connection"))
