@@ -318,7 +318,12 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		config.wsDialer = websocket.DefaultDialer
 	}
 	connFactory := func() (*websocket.Conn, error) {
-		conn, _, err := config.wsDialer.Dial(addr, requestHeader)
+		if config.timeout != 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, config.timeout)
+			defer cancel()
+		}
+		conn, _, err := config.wsDialer.DialContext(ctx, addr, requestHeader)
 		if err != nil {
 			return nil, &RPCConnectionError{fmt.Errorf("cannot dial address %s for %w", addr, err)}
 		}
