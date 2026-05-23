@@ -108,7 +108,7 @@ type wsConn struct {
 	spawnOutChanHandlerOnce sync.Once
 
 	// chanCtr is a counter used for identifying output channels on the server side
-	chanCtr uint64
+	chanCtr atomic.Uint64
 
 	registerCh chan outChanReg
 }
@@ -315,7 +315,7 @@ func (c *wsConn) handleChanOut(ch reflect.Value, req any) error {
 	c.spawnOutChanHandlerOnce.Do(func() {
 		go c.handleOutChans()
 	})
-	id := atomic.AddUint64(&c.chanCtr, 1)
+	id := c.chanCtr.Add(1)
 
 	select {
 	case c.registerCh <- outChanReg{

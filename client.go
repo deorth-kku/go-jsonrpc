@@ -182,7 +182,7 @@ type client struct {
 
 	doRequest func(context.Context, clientRequest) (clientResponse, error)
 	ctx       context.Context
-	idCtr     int64
+	idCtr     atomic.Int64
 
 	methodNameFormatter MethodNameFormatter
 	logger              *slog.Logger
@@ -318,12 +318,13 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 		config.wsDialer = websocket.DefaultDialer
 	}
 	connFactory := func() (*websocket.Conn, error) {
+		hsctx := ctx
 		if config.timeout != 0 {
 			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, config.timeout)
+			hsctx, cancel = context.WithTimeout(ctx, config.timeout)
 			defer cancel()
 		}
-		conn, _, err := config.wsDialer.DialContext(ctx, addr, requestHeader)
+		conn, _, err := config.wsDialer.DialContext(hsctx, addr, requestHeader)
 		if err != nil {
 			return nil, &RPCConnectionError{fmt.Errorf("cannot dial address %s for %w", addr, err)}
 		}
@@ -654,7 +655,7 @@ func HasReqCtx(ctx context.Context) bool {
 func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 	var id any
 	if !fn.notify {
-		id = float64(atomic.AddInt64(&fn.client.idCtr, 1))
+		id = float64(fn.client.idCtr.Add(1))
 		// Prepare the ID to send on the wire.
 		// We track int64 ids as float64 in the inflight map (because that's what
 		// they'll be decoded to). encoding/json outputs numbers with their minimal
