@@ -146,6 +146,9 @@ func WithPingInterval(d time.Duration) func(c *Config) {
 
 func WithTimeout(d time.Duration) func(c *Config) {
 	return func(c *Config) {
+		if d < 0 {
+			return
+		}
 		c.timeout = d
 	}
 }

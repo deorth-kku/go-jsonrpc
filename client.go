@@ -323,7 +323,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	}
 	connFactory := func() (*websocket.Conn, error) {
 		hsctx := ctx
-		if config.timeout != 0 {
+		if config.timeout > 0 {
 			var cancel context.CancelFunc
 			hsctx, cancel = context.WithTimeout(ctx, config.timeout)
 			defer cancel()
@@ -577,7 +577,7 @@ func (c *client) sendRequest(ctx context.Context, req request, chCtor makeChanSi
 		retCh:    chCtor,
 		respType: ty,
 	}
-	if c.timeout != 0 {
+	if c.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.timeout)
 		defer cancel()
