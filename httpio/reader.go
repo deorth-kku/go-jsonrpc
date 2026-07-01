@@ -13,9 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/deorth-kku/go-common"
 	"github.com/google/uuid"
 
+	"github.com/deorth-kku/go-common/args"
+	ccontext "github.com/deorth-kku/go-common/context"
 	"github.com/filecoin-project/go-jsonrpc"
 )
 
@@ -53,7 +54,7 @@ func newRequest(ctx context.Context, u *url.URL, method string, body io.Reader, 
 }
 
 func safeSplitRight(ctx context.Context) context.Context {
-	_, right := jsonrpc.SplitContext(ctx)
+	_, right := ccontext.SplitContext(ctx)
 	if right != nil {
 		return right
 	}
@@ -194,7 +195,7 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 		}
 		defer readers.Delete(u)
 
-		ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
+		ch := args.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
 		logger.Debug("reader handler get channel", "uuid", u, "ch", ch)
 
 		ctx, wrc := newWaitReader(req.Context(), req.Body)
@@ -227,7 +228,7 @@ func ReaderParamDecoder() (http.HandlerFunc, jsonrpc.ServerOption) {
 			}
 			defer readers.Delete(u)
 
-			ch := common.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
+			ch := args.Drop1(readers.LoadOrStore(u, make(chan *waitReadCloser))).(chan *waitReadCloser)
 			logger.Debug("reader unmarshal get channel", "uuid", u, "ch", ch)
 			ctx := jsonrpc.ContextFrom(dec.Options())
 			select {

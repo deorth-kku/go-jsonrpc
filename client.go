@@ -20,7 +20,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/deorth-kku/go-common"
+	gargs "github.com/deorth-kku/go-common/args"
+	ccmp "github.com/deorth-kku/go-common/cmp"
+	ccontext "github.com/deorth-kku/go-common/context"
+	cerrors "github.com/deorth-kku/go-common/errors"
+	cjson "github.com/deorth-kku/go-common/json"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -81,7 +85,7 @@ var (
 )
 
 func (rv resultValue) LogValue() slog.Value {
-	if common.IsZero(rv.value) {
+	if ccmp.IsZero(rv.value) {
 		return slog.Value{}
 	}
 	return slog.AnyValue(rv.value.Interface())
@@ -231,9 +235,9 @@ func newCustomReaderClient(ctx context.Context, namespace string, outs []any, do
 	c := config.getclient(clientctx, namespace)
 
 	c.doRequest = func(ctx context.Context, cr clientRequest) (clientResponse, error) {
-		ctx, cancel := MergeContext(ctx, clientctx)
+		ctx, cancel := ccontext.MergeContext(ctx, clientctx)
 		defer cancel()
-		rd := NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
+		rd := cjson.NewJsonReader(&cr.req, WithContext(c.jsonOption, ctx))
 		defer rd.Close()
 
 		rawResp, err := doRequest(ctx, rd)
@@ -393,7 +397,7 @@ func websocketClient(ctx context.Context, addr string, namespace string, outs []
 	}, nil
 }
 
-const ErrWsExiting = common.ErrorString("websocket routine exiting")
+const ErrWsExiting = cerrors.String("websocket routine exiting")
 
 func (c *client) setupRequestChan() chan clientRequest {
 	requests := make(chan clientRequest)
@@ -514,7 +518,7 @@ func (c *client) makeOutChan(ctx context.Context, ftyp reflect.Type, valOut int)
 					return
 				case 1:
 					if ok {
-						vvval := common.MustOk(reflect.TypeAssert[reflect.Value](val))
+						vvval := gargs.MustOk(reflect.TypeAssert[reflect.Value](val))
 						buf.PushBack(vvval)
 						if buf.Len() > 1 {
 							if buf.Len() > 10 {
@@ -665,7 +669,7 @@ func (fn *rpcFunc) handleRpcCall(args []reflect.Value) []reflect.Value {
 
 	ctx := fn.client.ctx
 	if fn.hasCtx == 1 {
-		ctx = common.MustOk(reflect.TypeAssert[context.Context](args[0]))
+		ctx = gargs.MustOk(reflect.TypeAssert[context.Context](args[0]))
 		ctx = context.WithValue(ctx, withReqCtx{}, withReqCtx{})
 		args = args[1:]
 	}

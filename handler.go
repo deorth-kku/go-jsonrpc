@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/deorth-kku/go-common"
+	"github.com/deorth-kku/go-common/args"
 )
 
 // Object is my solution for named params in golang.
@@ -344,7 +344,7 @@ func (s *handler) handle(ctx context.Context, req request, w func(any) error, rp
 	if !ok {
 		err := fmt.Errorf("method '%s' not found", req.Method)
 		rpcError(w, &req, rpcMethodNotFound, err)
-		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, common.Drop1(req.Params.getdeferredData()).data, req.Meta, err)
+		safecall6(s.tracer.OnInvalidMethod, req.Jsonrpc, req.ID, req.Method, args.Drop1(req.Params.getdeferredData()).data, req.Meta, err)
 		done(false)
 		return
 	}

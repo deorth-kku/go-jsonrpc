@@ -1,17 +1,13 @@
 package jsonrpc
 
 import (
-	"context"
 	"encoding/json/v2"
-	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"runtime"
 	"testing"
 
-	"github.com/deorth-kku/go-common"
-	ctest "github.com/deorth-kku/go-common/test"
+	cslices "github.com/deorth-kku/go-common/datatypes/slices"
+	clog "github.com/deorth-kku/go-common/log"
 )
 
 func TestParams(t *testing.T) {
@@ -30,7 +26,7 @@ func TestParams(t *testing.T) {
 var _ slog.LogValuer = stackstring{}
 
 func TestStack(t *testing.T) {
-	common.SetLogRaw(os.Stderr, slog.LevelDebug, common.TextFormat)
+	clog.SetRaw(os.Stderr, slog.LevelDebug, clog.TextFormat)
 	slog.Error("test stack", "test", 1, "stack", stackstring{})
 }
 
@@ -40,7 +36,7 @@ func getreq() *request {
 		Jsonrpc: "2.0",
 		ID:      1,
 		Method:  "test",
-		Params:  getParam(common.AnySlice(list)...),
+		Params:  getParam(cslices.ToAny(list)...),
 	}
 }
 
@@ -51,79 +47,4 @@ func BenchmarkJsonMarshal(b *testing.B) {
 		data, _ := json.Marshal(data)
 		_ = len(data)
 	}
-}
-
-func BenchmarkDiscard(b *testing.B) {
-	rd := NewJsonReader(getreq())
-	b.ResetTimer()
-	for b.Loop() {
-		_, _ = rd.WriteTo(io.Discard)
-	}
-}
-
-func BenchmarkLen(b *testing.B) {
-	rd := NewJsonReader(getreq())
-	b.ResetTimer()
-	for b.Loop() {
-		_, _ = rd.Len()
-	}
-}
-
-func TestRead(t *testing.T) {
-	rd := NewJsonReader(getreq())
-	discard := make([]byte, 10)
-	var err error
-	count := 0
-	for {
-		var l int
-		l, err = rd.Read(discard)
-		if err != nil {
-			break
-		}
-		count += l
-	}
-	fmt.Println(count, err)
-	fmt.Println(rd.Len())
-}
-
-func TestJsonReaderClose(t *testing.T) {
-	rd := NewJsonReader(getreq())
-	io.ReadAll(rd)
-	n, _ := io.ReadAll(rd)
-	if len(n) != 0 {
-		t.Error("still read")
-	}
-
-	rd = NewJsonReader(getreq())
-	io.Copy(io.Discard, rd)
-	l, _ := io.Copy(io.Discard, rd)
-	if l != 0 {
-		t.Error("still read")
-	}
-
-	rd = NewJsonReader(getreq())
-	io.ReadAll(rd)
-	l, _ = io.Copy(io.Discard, rd)
-	if l != 0 {
-		t.Error("still read")
-	}
-
-	rd = NewJsonReader(getreq())
-	io.Copy(io.Discard, rd)
-	n, _ = io.ReadAll(rd)
-	if len(n) != 0 {
-		t.Error("still read")
-	}
-
-	runtime.GC()
-}
-
-func TestSplitContext(t *testing.T) {
-	a := t.Context()
-	b := common.Drop1(context.WithCancel(a))
-	merged, _ := MergeContext(a, b)
-	a2, b2 := SplitContext(merged)
-
-	ctest.Equal(t, a, a2)
-	ctest.Equal(t, b, b2)
 }

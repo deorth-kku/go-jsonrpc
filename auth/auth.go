@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/deorth-kku/go-common"
+	cargs "github.com/deorth-kku/go-common/args"
 )
 
 type Permission string
@@ -48,7 +48,7 @@ func PermissionedProxy(validPerms, defaultPerms []Permission, in any, out any) {
 		fn := ra.MethodByName(field.Name)
 
 		rint.Field(f).Set(reflect.MakeFunc(field.Type, func(args []reflect.Value) (results []reflect.Value) {
-			ctx := common.MustOk(reflect.TypeAssert[context.Context](args[0]))
+			ctx := cargs.MustOk(reflect.TypeAssert[context.Context](args[0]))
 			if HasPerm(ctx, defaultPerms, requiredPerm) {
 				return fn.Call(args)
 			}

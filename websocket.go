@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/deorth-kku/go-common"
+	"github.com/deorth-kku/go-common/args"
 	"github.com/gorilla/websocket"
 )
 
@@ -240,7 +240,7 @@ func (c *wsConn) handleOutChans() {
 				return
 			}
 
-			registration := common.MustOk(reflect.TypeAssert[outChanReg](val))
+			registration := args.MustOk(reflect.TypeAssert[outChanReg](val))
 
 			caseToID = append(caseToID, registration.chID)
 			cases = append(cases, reflect.SelectCase{
@@ -380,7 +380,7 @@ func (c *wsConn) handleChanMessage(frame frame) {
 	hnd.lk.Lock()
 	defer hnd.lk.Unlock()
 
-	hnd.cb(common.MustOk(reflect.TypeAssert[jsontext.Value](frame.Params.values[1])), true)
+	hnd.cb(args.MustOk(reflect.TypeAssert[jsontext.Value](frame.Params.values[1])), true)
 }
 
 func (c *wsConn) handleChanClose(frame frame) {

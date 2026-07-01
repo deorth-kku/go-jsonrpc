@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 
-	"github.com/deorth-kku/go-common"
+	"github.com/deorth-kku/go-common/datatypes"
 )
 
 type response struct {
@@ -36,13 +36,13 @@ func (r response) MarshalJSONTo(enc *jsontext.Encoder) error {
 	if err != nil {
 		return err
 	}
-	m := common.PairSlice[string, any]{
-		common.NewPair("jsonrpc", any(r.Jsonrpc)),
-		common.NewPair("id", r.ID),
-		common.NewPair("result", r.Result),
+	m := datatypes.PairSlice[string, any]{
+		datatypes.NewPair("jsonrpc", any(r.Jsonrpc)),
+		datatypes.NewPair("id", r.ID),
+		datatypes.NewPair("result", r.Result),
 	}
 	if r.Error != nil {
-		m[2] = common.NewPair("error", any(r.Error))
+		m[2] = datatypes.NewPair("error", any(r.Error))
 	}
 	for k, v := range m.Range {
 		err = json.MarshalEncode(enc, k)

@@ -22,13 +22,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deorth-kku/go-common"
+	"github.com/deorth-kku/go-common/datatypes"
+	cerrors "github.com/deorth-kku/go-common/errors"
+	clog "github.com/deorth-kku/go-common/log"
 	ctest "github.com/deorth-kku/go-common/test"
 	"github.com/gorilla/websocket"
 )
 
 func setlog(lv string) {
-	common.SetLog("", lv, common.DefaultFormat.String(), common.SlogAddSource{})
+	clog.Set("", lv, clog.DefaultFormat.String(), clog.SlogAddSource{})
 }
 
 func init() {
@@ -1279,7 +1281,7 @@ func (h *ErrHandler) TestMy(s string) error {
 }
 
 func (h *ErrHandler) TestStringError(str string) error {
-	return common.ErrorString(str)
+	return cerrors.String(str)
 }
 
 func TestUserError(t *testing.T) {
@@ -1298,7 +1300,7 @@ func TestUserError(t *testing.T) {
 	errs.Register(EBad, new(ErrSomethingBad))
 	errs.Register(EBad2, new(*ErrSomethingBad))
 	errs.Register(EMy, new(*ErrMyErr))
-	RegisterError[common.ErrorString](errs, EStr)
+	RegisterError[cerrors.String](errs, EStr)
 
 	rpcServer := NewServer(WithServerErrors(errs))
 	rpcServer.Register("ErrHandler", serverHandler)
@@ -1561,8 +1563,8 @@ func (h *VarOptParamHandler) CallOptionalLen(ctx context.Context, opt Optional[b
 	return count, nil
 }
 
-func (h *VarOptParamHandler) CallMixed(ctx context.Context, opt Optional[string], ps ...string) (common.Pair[int, int], error) {
-	return common.NewPair(lennilstring(opt), len(ps)), nil
+func (h *VarOptParamHandler) CallMixed(ctx context.Context, opt Optional[string], ps ...string) (datatypes.Pair[int, int], error) {
+	return datatypes.NewPair(lennilstring(opt), len(ps)), nil
 }
 
 func TestCallWithOptionalVariadicParams(t *testing.T) {
@@ -1580,7 +1582,7 @@ func TestCallWithOptionalVariadicParams(t *testing.T) {
 		CallVariadic    func(ctx context.Context, ps ...string) (int, error)
 		CallOptional    func(ctx context.Context, opt Optional[string]) (int, error)
 		CallOptionalLen func(ctx context.Context, opt Optional[bool], opt2 Optional[bool]) (int, error)
-		CallMixed       func(ctx context.Context, opt Optional[string], ps ...string) (common.Pair[int, int], error)
+		CallMixed       func(ctx context.Context, opt Optional[string], ps ...string) (datatypes.Pair[int, int], error)
 	}
 	for _, proto := range []string{"ws", "http"} {
 		t.Run(proto, func(t *testing.T) {

@@ -2,7 +2,6 @@ package jsonrpc
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -15,7 +14,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -292,90 +290,6 @@ func (l *LimitedReader) Read(p []byte) (n int, err error) {
 	return
 }
 
-type JsonReader struct {
-	data    any
-	options json.Options
-	rd      *io.PipeReader
-}
-
-func NewJsonReader(data any, opts ...json.Options) *JsonReader {
-	return &JsonReader{
-		data:    data,
-		options: json.JoinOptions(opts...),
-	}
-}
-
-func closeCloser[T io.Closer](c T) {
-	c.Close()
-}
-
-func (j *JsonReader) Read(b []byte) (int, error) {
-	if j.rd == nil {
-		var wt *io.PipeWriter
-		j.rd, wt = io.Pipe()
-		go func() {
-			var err error
-			defer func() { wt.CloseWithError(err) }()
-			_, err = j.writeto(wt)
-		}()
-		runtime.AddCleanup(j, closeCloser, wt)
-	}
-	return j.rd.Read(b)
-}
-
-func (j *JsonReader) Close() error {
-	if j.rd == nil {
-		j.setclose()
-		return nil
-	}
-	return j.rd.Close()
-}
-
-func (j JsonReader) writeto(wt io.Writer) (int64, error) {
-	enc := jsontext.NewEncoder(wt, j.options)
-	err := json.MarshalEncode(enc, j.data)
-	return enc.OutputOffset(), err
-}
-
-var (
-	closedPipe *io.PipeReader
-	pipeOnce   sync.Once
-)
-
-func (j *JsonReader) setclose() {
-	pipeOnce.Do(func() {
-		var wt *io.PipeWriter
-		closedPipe, wt = io.Pipe()
-		wt.Close()
-	})
-	j.rd = closedPipe
-}
-
-func (j *JsonReader) WriteTo(wt io.Writer) (int64, error) {
-	if j.rd != nil {
-		return io.Copy(wt, j.rd)
-	}
-	j.setclose()
-	return j.writeto(wt)
-}
-
-type countWriter struct {
-	n int
-}
-
-func (c *countWriter) Write(p []byte) (int, error) {
-	c.n += len(p)
-	return len(p), nil
-}
-
-func (j JsonReader) Len() (int64, error) {
-	wt := new(countWriter)
-	err := json.MarshalWrite(wt, j.data, j.options)
-	// [json.MarshalWrite] does not write the tailing \n
-	// this is faster than using [jsontext.Encoder.OutputOffset]
-	return int64(wt.n + 1), err
-}
-
 type stackstring struct{}
 
 func (stackstring) LogValue() slog.Value {
@@ -403,74 +317,4 @@ func NewTeeLogValue(r io.Reader) teeValue {
 	v := teeValue{str: new(strings.Builder)}
 	v.r = io.TeeReader(r, v.str)
 	return v
-}
-
-type mergedContext struct {
-	left, right context.Context
-}
-
-func (m *mergedContext) Deadline() (time.Time, bool) {
-	a, ok := m.left.Deadline()
-	if !ok {
-		return m.right.Deadline()
-	}
-	b, ok := m.right.Deadline()
-	if !ok {
-		return a, true
-	}
-	if a.After(b) {
-		return b, true
-	}
-	return a, true
-}
-
-func (m *mergedContext) Value(key any) any {
-	v := m.left.Value(key)
-	if v == nil {
-		return m.right.Value(key)
-	}
-	return v
-}
-
-func (m *mergedContext) Done() <-chan struct{} {
-	return m.right.Done()
-}
-
-func (m *mergedContext) Err() error {
-	aerr := m.left.Err()
-	if aerr == nil {
-		return m.right.Err()
-	}
-	return aerr
-}
-
-func MergeContext(left, right context.Context) (context.Context, context.CancelFunc) {
-	switch left {
-	case context.Background(), context.TODO(), nil:
-		return context.WithCancel(right)
-	}
-	switch right {
-	case context.Background(), context.TODO(), nil:
-		return context.WithCancel(left)
-	}
-	rightalt, cancel := context.WithCancel(right)
-	stop := context.AfterFunc(left, cancel)
-	return &mergedContext{left, rightalt}, func() {
-		stop()
-		cancel()
-	}
-}
-
-func SplitContext(merged context.Context) (left, right context.Context) {
-	mer, ok := merged.(*mergedContext)
-	if !ok {
-		return
-	}
-	left = mer.left
-	rv := reflect.ValueOf(mer.right).Elem().Field(0)
-	right, ok = reflect.TypeAssert[context.Context](rv)
-	if !ok {
-		panic("context package changed")
-	}
-	return
 }
